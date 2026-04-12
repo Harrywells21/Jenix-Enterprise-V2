@@ -54,3 +54,27 @@ export const connectDashboardWS = (onMessage) => {
 };
 
 export default api;
+
+// Analytics
+export const getFleetOverview = ()   => api.get("/analytics/fleet");
+export const getMachineScore  = (id) => api.get(`/analytics/machine/${id}/score`);
+export const getAllAlerts      = ()   => api.get("/analytics/alerts/all");
+export const markAllRead       = ()   => api.post("/analytics/alerts/mark-all-read");
+export const getSavings        = ()   => api.get("/analytics/savings");
+
+// Fleet commands
+export const fleetCommand = (type, machine_ids=[]) =>
+  api.post("/fleet/command", { type, machine_ids });
+
+// Audit
+export const getAuditLogs  = ()      => api.get("/audit/logs");
+export const exportAuditCSV = ()     => `${BASE}/audit/logs/export`;
+export const verifyLog      = (id)   => api.get(`/audit/logs/verify/${id}`);
+
+// Schedules
+export const getSchedules    = ()    => api.get("/schedules");
+export const createSchedule  = (d)   => api.post("/schedules", d);
+export const deleteSchedule  = (id)  => api.delete(`/schedules/${id}`);
+
+// Notifications config
+export const updateNotifyConfig = (d) => api.post("/settings/notifications", d);

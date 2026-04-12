@@ -3,46 +3,38 @@ from fastapi import WebSocket, WebSocketDisconnect
 from datetime import datetime
 from typing import Dict
 
-# ── In-memory agent registry ───────────────────────────────────────────────
-# token → WebSocket
-_agents: Dict[str, WebSocket] = {}
+_agents:     Dict[str, WebSocket] = {}
+_dashboards: list[WebSocket]      = []
 
-# ── In-memory dashboard listeners ─────────────────────────────────────────
-# list of active dashboard WebSocket connections
-_dashboards: list[WebSocket] = []
-
-# ── Agent connects ─────────────────────────────────────────────────────────
 async def agent_endpoint(websocket: WebSocket, token: str):
     from db import SessionLocal, Machine, Metric, Alert
-    from datetime import datetime
+    from notifications import notify_critical_alert
 
     await websocket.accept()
     _agents[token] = websocket
 
-    # Mark machine online
     db = SessionLocal()
     try:
         m = db.query(Machine).filter(Machine.token == token).first()
-        if m:
-            m.status    = "online"
-            m.last_seen = datetime.utcnow()
-            db.commit()
-            machine_id = m.id
-        else:
+        if not m:
             await websocket.close(code=4001)
             return
+        m.status    = "online"
+        m.last_seen = datetime.utcnow()
+        db.commit()
+        machine_id = m.id
+        hostname   = m.hostname
     finally:
         db.close()
 
-    print(f"[WS] Agent connected: token={token[:8]}... machine_id={machine_id}")
+    print(f"[WS] Agent connected: {hostname} (machine_id={machine_id})")
 
     try:
         while True:
-            raw = await websocket.receive_text()
+            raw  = await websocket.receive_text()
             data = json.loads(raw)
             msg_type = data.get("type")
 
-            # ── Metrics payload ────────────────────────────────────────────
             if msg_type == "metrics":
                 db = SessionLocal()
                 try:
@@ -59,42 +51,60 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                             disk_mb    = data.get("disk_mb", 0.0),
                         )
                         db.add(metric)
-                        # ── Alert checks ───────────────────────────────────
+
+                        # Alert checks with notifications
                         alerts_to_add = []
-                        if data.get("cpu", 0) > 85:
+                        cpu  = data.get("cpu",  0)
+                        ram  = data.get("ram",  0)
+                        disk = data.get("disk", 0)
+
+                        if cpu > 85:
                             alerts_to_add.append(Alert(
                                 machine_id=m.id, level="warning",
                                 type="cpu",
-                                message=f"CPU at {data['cpu']:.1f}%"))
-                        if data.get("ram", 0) > 85:
+                                message=f"CPU at {cpu:.1f}%"))
+                            if cpu > 95:
+                                asyncio.create_task(
+                                    asyncio.to_thread(
+                                        notify_critical_alert,
+                                        m.hostname, "cpu",
+                                        f"CPU at {cpu:.1f}%"
+                                    ))
+                        if ram > 85:
                             alerts_to_add.append(Alert(
                                 machine_id=m.id, level="warning",
                                 type="ram",
-                                message=f"RAM at {data['ram']:.1f}%"))
-                        if data.get("disk", 0) > 90:
+                                message=f"RAM at {ram:.1f}%"))
+                        if disk > 90:
                             alerts_to_add.append(Alert(
                                 machine_id=m.id, level="critical",
                                 type="disk",
-                                message=f"Disk at {data['disk']:.1f}%"))
+                                message=f"Disk at {disk:.1f}%"))
+                            asyncio.create_task(
+                                asyncio.to_thread(
+                                    notify_critical_alert,
+                                    m.hostname, "disk",
+                                    f"Disk at {disk:.1f}%"
+                                ))
+
                         for a in alerts_to_add:
                             db.add(a)
                         db.commit()
-                        # Forward to dashboards
+
                         await _broadcast_dashboards({
                             "type":       "metrics",
                             "machine_id": m.id,
                             "hostname":   m.hostname,
-                            "cpu":        data.get("cpu",    0.0),
-                            "ram":        data.get("ram",    0.0),
-                            "disk":       data.get("disk",   0.0),
-                            "net_mb":     data.get("net_mb", 0.0),
-                            "disk_mb":    data.get("disk_mb",0.0),
+                            "cpu":        cpu,
+                            "ram":        ram,
+                            "disk":       disk,
+                            "net_mb":     data.get("net_mb",  0.0),
+                            "disk_mb":    data.get("disk_mb", 0.0),
                             "timestamp":  datetime.utcnow().isoformat(),
                         })
                 finally:
                     db.close()
 
-            # ── Command output ─────────────────────────────────────────────
             elif msg_type == "cmd_output":
                 cmd_id = data.get("cmd_id")
                 output = data.get("output", "")
@@ -102,7 +112,8 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                 db = SessionLocal()
                 try:
                     from db import Command
-                    cmd = db.query(Command).filter(Command.id == cmd_id).first()
+                    cmd = db.query(Command)\
+                            .filter(Command.id == cmd_id).first()
                     if cmd:
                         cmd.output    += output
                         cmd.status     = status
@@ -117,7 +128,6 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                 finally:
                     db.close()
 
-            # ── Ping ───────────────────────────────────────────────────────
             elif msg_type == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
 
@@ -127,13 +137,17 @@ async def agent_endpoint(websocket: WebSocket, token: str):
         print(f"[WS] Agent error: {e}")
     finally:
         _agents.pop(token, None)
-        # Mark offline
         db = SessionLocal()
         try:
             m = db.query(Machine).filter(Machine.token == token).first()
             if m:
                 m.status = "offline"
                 db.commit()
+                from notifications import notify_machine_offline
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        notify_machine_offline, m.hostname, m.ip
+                    ))
                 await _broadcast_dashboards({
                     "type":       "status",
                     "machine_id": m.id,
@@ -141,26 +155,21 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                 })
         finally:
             db.close()
-        print(f"[WS] Agent disconnected: token={token[:8]}...")
+        print(f"[WS] Agent disconnected: {hostname}")
 
-
-# ── Dashboard connects ─────────────────────────────────────────────────────
 async def dashboard_endpoint(websocket: WebSocket):
     await websocket.accept()
     _dashboards.append(websocket)
     print(f"[WS] Dashboard connected — total: {len(_dashboards)}")
     try:
         while True:
-            await websocket.receive_text()  # keep alive
+            await websocket.receive_text()
     except WebSocketDisconnect:
         pass
     finally:
         if websocket in _dashboards:
             _dashboards.remove(websocket)
-        print(f"[WS] Dashboard disconnected — total: {len(_dashboards)}")
 
-
-# ── Send command to a specific agent ──────────────────────────────────────
 async def send_command(token: str, payload: dict) -> bool:
     ws = _agents.get(token)
     if not ws:
@@ -172,8 +181,6 @@ async def send_command(token: str, payload: dict) -> bool:
         print(f"[WS] send_command error: {e}")
         return False
 
-
-# ── Broadcast to all dashboards ────────────────────────────────────────────
 async def _broadcast_dashboards(payload: dict):
     dead = []
     for ws in _dashboards:
@@ -185,11 +192,10 @@ async def _broadcast_dashboards(payload: dict):
         if ws in _dashboards:
             _dashboards.remove(ws)
 
-
-# ── Offline watchdog — runs every 30 seconds ───────────────────────────────
 async def offline_watchdog():
     from db import SessionLocal, Machine, Alert
     from datetime import timedelta
+    from notifications import notify_machine_offline
     while True:
         await asyncio.sleep(30)
         db = SessionLocal()
@@ -205,6 +211,10 @@ async def offline_watchdog():
                     machine_id=m.id, level="critical",
                     type="offline",
                     message=f"{m.hostname} went offline"))
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        notify_machine_offline, m.hostname, m.ip
+                    ))
                 await _broadcast_dashboards({
                     "type":       "status",
                     "machine_id": m.id,
