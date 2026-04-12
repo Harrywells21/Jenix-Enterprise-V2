@@ -5,6 +5,7 @@ import Overview from "./pages/Overview";
 import Machine  from "./pages/Machine";
 import Reports  from "./pages/Reports";
 import Users    from "./pages/Users";
+import Settings from "./pages/Settings";
 import Sidebar  from "./components/Sidebar";
 
 function Protected({ children }) {
@@ -14,7 +15,8 @@ function Protected({ children }) {
 
 function Layout({ children }) {
   return (
-    <div style={{ display:"flex", height:"100vh", overflow:"hidden", background:"#0d0d1a" }}>
+    <div style={{ display:"flex", height:"100vh",
+                  overflow:"hidden", background:"#0d0d1a" }}>
       <Sidebar />
       <main style={{ flex:1, overflowY:"auto", padding:"24px" }}>
         {children}
@@ -40,6 +42,9 @@ export default function App() {
           }/>
           <Route path="/users" element={
             <Protected><Layout><Users /></Layout></Protected>
+          }/>
+          <Route path="/settings" element={
+            <Protected><Layout><Settings /></Layout></Protected>
           }/>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

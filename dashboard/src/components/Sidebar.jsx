@@ -2,13 +2,14 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 const NAV = [
-  { path: "/",        label: "Overview", icon: "🖥" },
-  { path: "/reports", label: "Reports",  icon: "📄" },
-  { path: "/users",   label: "Users",    icon: "👥" },
+  { path:"/",         label:"Overview",  icon:"🖥" },
+  { path:"/reports",  label:"Reports",   icon:"📄" },
+  { path:"/users",    label:"Users",     icon:"👥" },
+  { path:"/settings", label:"Settings",  icon:"⚙" },
 ];
 
 export default function Sidebar() {
-  const { pathname }    = useLocation();
+  const { pathname }     = useLocation();
   const { user, logout } = useAuth();
 
   return (
@@ -19,9 +20,14 @@ export default function Sidebar() {
       display:"flex", flexDirection:"column",
       padding:"24px 0"
     }}>
-      <div style={{ padding:"0 24px 24px", borderBottom:"1px solid #2a2a3e" }}>
-        <div style={{ color:"#00bcd4", fontSize:"22px", fontWeight:700 }}>JENIX</div>
-        <div style={{ color:"#666", fontSize:"11px", marginTop:"2px" }}>Enterprise v1.0</div>
+      <div style={{ padding:"0 24px 24px",
+                    borderBottom:"1px solid #2a2a3e" }}>
+        <div style={{ color:"#00bcd4", fontSize:"22px", fontWeight:700 }}>
+          JENIX
+        </div>
+        <div style={{ color:"#666", fontSize:"11px", marginTop:"2px" }}>
+          Enterprise v1.0
+        </div>
       </div>
 
       <nav style={{ flex:1, padding:"16px 0" }}>
@@ -33,7 +39,8 @@ export default function Sidebar() {
               padding:"10px 24px", textDecoration:"none",
               color:      active ? "#00bcd4" : "#aaa",
               background: active ? "#1a1a2e" : "transparent",
-              borderLeft: active ? "3px solid #00bcd4" : "3px solid transparent",
+              borderLeft: active ? "3px solid #00bcd4"
+                                 : "3px solid transparent",
               fontSize:"14px", fontWeight: active ? 600 : 400,
               transition:"all 0.15s"
             }}>
@@ -43,7 +50,8 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div style={{ padding:"16px 24px", borderTop:"1px solid #2a2a3e" }}>
+      <div style={{ padding:"16px 24px",
+                    borderTop:"1px solid #2a2a3e" }}>
         <div style={{ color:"#aaa", fontSize:"12px" }}>Logged in as</div>
         <div style={{ color:"#e0e0e0", fontSize:"13px",
                       fontWeight:600, marginBottom:"10px" }}>

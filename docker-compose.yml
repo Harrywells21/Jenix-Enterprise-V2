@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  jenix-server:
+    build: .
+    container_name: jenix-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - jenix-db:/app/jenix.db
+      - jenix-reports:/app/reports
+    environment:
+      - SECRET_KEY=change_this_in_production
+      - ADMIN_EMAIL=admin@jenix.io
+      - ADMIN_PASSWORD=admin123
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: jenix-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - jenix-server
+    restart: unless-stopped
+
+volumes:
+  jenix-db:
+  jenix-reports:
