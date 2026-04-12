@@ -1,0 +1,63 @@
+{
+  "_meta": {
+    "schema_version": "1.0",
+    "app": "JENIX",
+    "description": "Persistent rollback state — stores every tracked action and its revert command.",
+    "fields": {
+      "id":          "8-char hex hash uniquely identifying the entry",
+      "ts":          "ISO-8601 timestamp of when the action was recorded",
+      "action_type": "Category: install | remove | upgrade | config | sysctl | boost | clean | fix",
+      "description": "Human-readable summary of the action taken",
+      "revert_cmd":  "Shell command that undoes the action; starts with '#' if manual intervention required",
+      "metadata":    "Optional dict of extra context (package name, file path, old value, etc.)",
+      "reverted":    "Boolean — true once the revert command has been successfully executed"
+    }
+  },
+  "actions": [
+    {
+      "id":          "a1b2c3d4",
+      "ts":          "2026-04-04T10:00:00.000000",
+      "action_type": "boost",
+      "description": "Boost: Set swappiness=1",
+      "revert_cmd":  "sudo sysctl -w vm.swappiness=60",
+      "metadata":    { "task": "Set swappiness=1", "key": "vm.swappiness", "old": "60", "new": "1" },
+      "reverted":    false
+    },
+    {
+      "id":          "b2c3d4e5",
+      "ts":          "2026-04-04T10:01:00.000000",
+      "action_type": "sysctl",
+      "description": "sysctl vm.dirty_ratio: 20 → 5",
+      "revert_cmd":  "sudo sysctl -w vm.dirty_ratio=20",
+      "metadata":    { "key": "vm.dirty_ratio", "old": "20", "new": "5" },
+      "reverted":    false
+    },
+    {
+      "id":          "c3d4e5f6",
+      "ts":          "2026-04-04T10:02:00.000000",
+      "action_type": "install",
+      "description": "Installed package: htop",
+      "revert_cmd":  "sudo apt-get remove -y htop",
+      "metadata":    { "package": "htop", "family": "debian" },
+      "reverted":    false
+    },
+    {
+      "id":          "d4e5f6a7",
+      "ts":          "2026-04-04T10:03:00.000000",
+      "action_type": "config",
+      "description": "Modified config: /etc/ssh/sshd_config",
+      "revert_cmd":  "# Manual restore required — no backup path recorded",
+      "metadata":    { "original": "/etc/ssh/sshd_config", "backup": "" },
+      "reverted":    false
+    },
+    {
+      "id":          "e5f6a7b8",
+      "ts":          "2026-04-04T10:04:00.000000",
+      "action_type": "boost",
+      "description": "Boost: Set net.core.rmem_max",
+      "revert_cmd":  "sudo sysctl -w net.core.rmem_max=212992",
+      "metadata":    { "task": "Set net.core.rmem_max", "key": "net.core.rmem_max", "old": "212992", "new": "16777216" },
+      "reverted":    true
+    }
+  ]
+}

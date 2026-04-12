@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.db
+venv/
+node_modules/
+dashboard/build/
+server/reports/
+*.zip
