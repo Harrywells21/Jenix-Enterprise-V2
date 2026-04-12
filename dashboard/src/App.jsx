@@ -1,15 +1,16 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
-import Landing   from "./pages/Landing";
-import Login     from "./pages/Login";
-import Fleet     from "./pages/Fleet";
-import Overview  from "./pages/Overview";
-import Machine   from "./pages/Machine";
-import Reports   from "./pages/Reports";
-import Users     from "./pages/Users";
-import Settings  from "./pages/Settings";
-import AuditPage from "./pages/AuditPage";
-import Sidebar   from "./components/Sidebar";
+import Landing    from "./pages/Landing";
+import Login      from "./pages/Login";
+import Fleet      from "./pages/Fleet";
+import Overview   from "./pages/Overview";
+import Machine    from "./pages/Machine";
+import Reports    from "./pages/Reports";
+import Users      from "./pages/Users";
+import Settings   from "./pages/Settings";
+import AuditPage  from "./pages/AuditPage";
+import CVEScanner from "./pages/CVEScanner";
+import Sidebar    from "./components/Sidebar";
 
 function Protected({ children }) {
   const { token } = useAuth();
@@ -49,6 +50,9 @@ export default function App() {
           }/>
           <Route path="/audit" element={
             <Protected><Layout><AuditPage /></Layout></Protected>
+          }/>
+          <Route path="/cve" element={
+            <Protected><Layout><CVEScanner /></Layout></Protected>
           }/>
           <Route path="/users" element={
             <Protected><Layout><Users /></Layout></Protected>

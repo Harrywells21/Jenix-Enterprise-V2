@@ -2,12 +2,13 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 const NAV = [
-  { path:"/",         label:"Fleet Command",  icon:"🚀", divider:false },
-  { path:"/overview", label:"All Machines",   icon:"🖥", divider:false },
-  { path:"/reports",  label:"Reports",        icon:"📄", divider:false },
-  { path:"/audit",    label:"Audit Log",      icon:"🔐", divider:false },
-  { path:"/users",    label:"Users",          icon:"👥", divider:true  },
-  { path:"/settings", label:"Settings",       icon:"⚙",  divider:false },
+  { path:"/",         label:"Fleet Command",   icon:"🚀" },
+  { path:"/overview", label:"All Machines",    icon:"🖥" },
+  { path:"/cve",      label:"CVE Scanner",     icon:"🛡", divider:false },
+  { path:"/reports",  label:"Reports",         icon:"📄" },
+  { path:"/audit",    label:"Audit Log",       icon:"🔐" },
+  { path:"/users",    label:"Users",           icon:"👥", divider:true },
+  { path:"/settings", label:"Settings",        icon:"⚙"  },
 ];
 
 export default function Sidebar() {
@@ -19,8 +20,7 @@ export default function Sidebar() {
       width:"220px", minWidth:"220px",
       background:"#0d0d1a",
       borderRight:"1px solid #1a1a2e",
-      display:"flex", flexDirection:"column",
-      padding:"0"
+      display:"flex", flexDirection:"column"
     }}>
       {/* Logo */}
       <div style={{
@@ -44,10 +44,8 @@ export default function Sidebar() {
           return (
             <div key={path}>
               {divider && (
-                <div style={{
-                  height:"1px", background:"#1a1a2e",
-                  margin:"8px 20px"
-                }}/>
+                <div style={{ height:"1px", background:"#1a1a2e",
+                              margin:"8px 20px" }}/>
               )}
               <Link to={path} style={{
                 display:"flex", alignItems:"center", gap:"10px",
@@ -63,16 +61,6 @@ export default function Sidebar() {
               }}>
                 <span style={{ fontSize:"15px" }}>{icon}</span>
                 <span>{label}</span>
-                {path==="/" && (
-                  <span style={{
-                    marginLeft:"auto", background:"#f44336",
-                    color:"#fff", borderRadius:"10px",
-                    fontSize:"9px", padding:"1px 6px",
-                    fontWeight:700, display:"none"
-                  }} className="alert-badge">
-                    !
-                  </span>
-                )}
               </Link>
             </div>
           );
@@ -80,10 +68,8 @@ export default function Sidebar() {
       </nav>
 
       {/* User */}
-      <div style={{
-        padding:"16px 20px",
-        borderTop:"1px solid #1a1a2e"
-      }}>
+      <div style={{ padding:"16px 20px",
+                    borderTop:"1px solid #1a1a2e" }}>
         <div style={{ display:"flex", alignItems:"center",
                       gap:"10px", marginBottom:"12px" }}>
           <div style={{
@@ -91,8 +77,7 @@ export default function Sidebar() {
             background:"#0a2a2a", border:"1px solid #00bcd4",
             display:"flex", alignItems:"center",
             justifyContent:"center",
-            color:"#00bcd4", fontSize:"13px", fontWeight:700,
-            flexShrink:0
+            color:"#00bcd4", fontSize:"13px", fontWeight:700
           }}>
             {user?.name?.[0]?.toUpperCase() || "A"}
           </div>
@@ -109,21 +94,16 @@ export default function Sidebar() {
             </div>
           </div>
         </div>
-        <button onClick={logout} style={{
-          width:"100%", padding:"6px",
-          background:"transparent", color:"#333",
-          border:"1px solid #1a1a2e", borderRadius:"6px",
-          cursor:"pointer", fontSize:"11px",
-          transition:"all 0.15s"
-        }}
-        onMouseOver={e => {
-          e.target.style.color="#f44336";
-          e.target.style.borderColor="#f44336";
-        }}
-        onMouseOut={e => {
-          e.target.style.color="#333";
-          e.target.style.borderColor="#1a1a2e";
-        }}>
+        <button onClick={logout}
+          onMouseOver={e=>{e.target.style.color="#f44336";e.target.style.borderColor="#f44336"}}
+          onMouseOut={e=>{e.target.style.color="#333";e.target.style.borderColor="#1a1a2e"}}
+          style={{
+            width:"100%", padding:"6px",
+            background:"transparent", color:"#333",
+            border:"1px solid #1a1a2e", borderRadius:"6px",
+            cursor:"pointer", fontSize:"11px",
+            transition:"all 0.15s"
+          }}>
           Sign Out
         </button>
       </div>
