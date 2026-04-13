@@ -173,3 +173,10 @@ def _seed_admin():
             print("✅ Default admin created:", admin.email)
     finally:
         db.close()
+
+
+class BlacklistedToken(Base):
+    __tablename__ = "blacklisted_tokens"
+    id         = Column(Integer, primary_key=True)
+    token_hash = Column(String, unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

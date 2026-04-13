@@ -9,6 +9,7 @@ import os
 from db import init_db
 from ws.handler         import agent_endpoint, dashboard_endpoint, offline_watchdog
 from scheduler          import init_scheduler
+from cleanup            import run_cleanup
 from security           import SECURITY_HEADERS, rate_limit_api
 
 from routes.auth            import router as auth_router
@@ -34,13 +35,15 @@ async def lifespan(app: FastAPI):
     print("✅ Offline watchdog started")
     init_scheduler()
     print("✅ Scheduler started")
+    asyncio.create_task(run_cleanup())
+    print("✅ Cleanup job scheduled")
     print("✅ JENIX Enterprise v2.0 running")
     yield
     print("[server] Shutting down...")
 
 app = FastAPI(
     title       = "JENIX Enterprise",
-    description = "Multi-node Linux system management",
+    description = "Multi-node Linux infrastructure management platform",
     version     = "2.0.0",
     lifespan    = lifespan,
 )
@@ -58,13 +61,12 @@ async def security_middleware(request: Request, call_next):
     client_ip = request.client.host if request.client else "unknown"
     if not rate_limit_api(client_ip):
         return JSONResponse(status_code=429,
-            content={"detail": "Too many requests"})
+            content={"detail": "Too many requests. Slow down."})
     response = await call_next(request)
     for k, v in SECURITY_HEADERS.items():
         response.headers[k] = v
     return response
 
-# ── All routes ─────────────────────────────────────────────────────────────
 for router in [
     auth_router, agents_router, commands_router,
     metrics_router, reports_router, schedules_router,
@@ -74,7 +76,6 @@ for router in [
 ]:
     app.include_router(router)
 
-# ── WebSocket ──────────────────────────────────────────────────────────────
 @app.websocket("/ws/agent/{token}")
 async def ws_agent(websocket: WebSocket, token: str):
     await agent_endpoint(websocket, token)
@@ -83,7 +84,6 @@ async def ws_agent(websocket: WebSocket, token: str):
 async def ws_dashboard(websocket: WebSocket):
     await dashboard_endpoint(websocket)
 
-# ── Static ─────────────────────────────────────────────────────────────────
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(static_dir, exist_ok=True)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
@@ -95,10 +95,8 @@ def installer():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "app": "JENIX Enterprise",
-            "version": "2.0.0"}
+    return {"status":"ok","app":"JENIX Enterprise","version":"2.0.0"}
 
 @app.get("/")
 def root():
-    return {"app": "JENIX Enterprise", "version": "2.0.0",
-            "docs": "/docs"}
+    return {"app":"JENIX Enterprise","version":"2.0.0","docs":"/docs"}

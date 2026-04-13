@@ -100,3 +100,53 @@ def verify_log(log_id: int,
         "timestamp": l.timestamp.isoformat(),
         "action":    l.action,
     }
+
+
+# ── Token-authenticated CSV export (for browser download) ─────────────────
+from fastapi import Query as QueryParam
+import jwt as _jwt
+import os as _os
+
+@router.get("/logs/export")
+def export_audit_csv_token(
+    token: str = QueryParam(None),
+    db: Session = Depends(get_db)
+):
+    """CSV export — accepts token as query param for browser downloads."""
+    # Verify token manually
+    if not token:
+        raise HTTPException(status_code=401, detail="Token required")
+    try:
+        SECRET = _os.getenv("SECRET_KEY", "jenix_secret")
+        payload = _jwt.decode(token, SECRET, algorithms=["HS256"])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    logs     = db.query(AuditLog)\
+                 .order_by(AuditLog.timestamp.desc())\
+                 .limit(1000).all()
+    machines = {m.id: m.hostname for m in db.query(Machine).all()}
+
+    import io, csv
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["ID","Timestamp","Machine","Action",
+                     "Detail","Status","SHA256 Hash"])
+    for l in logs:
+        writer.writerow([
+            l.id,
+            l.timestamp.isoformat(),
+            machines.get(l.machine_id, "System"),
+            l.action, l.detail, l.status,
+            _compute_hash(l),
+        ])
+    output.seek(0)
+    fname = f"jenix_audit_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={fname}"}
+    )

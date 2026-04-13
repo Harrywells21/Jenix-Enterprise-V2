@@ -2,24 +2,31 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useBrand } from "../context/BrandContext";
 
-const NAV = [
-  { path:"/",           label:"Fleet Command",  icon:"🚀" },
-  { path:"/overview",   label:"All Machines",   icon:"🖥" },
-  { path:"/uptime",     label:"Uptime Monitor", icon:"📡" },
-  { path:"/cve",        label:"CVE Scanner",    icon:"🛡" },
-  { path:"/reports",    label:"Reports",        icon:"📄" },
-  { path:"/audit",      label:"Audit Log",      icon:"🔐" },
-  { path:"/users",      label:"Users",          icon:"👥", divider:true },
-  { path:"/whitelabel", label:"Branding",       icon:"🎨" },
-  { path:"/settings",   label:"Settings",       icon:"⚙"  },
-  { path:"/demo",       label:"Demo Script",    icon:"🎬", divider:true },
+const NAV_ALL = [
+  { path:"/",           label:"Fleet Command",  icon:"🚀", role:"all"   },
+  { path:"/overview",   label:"All Machines",   icon:"🖥", role:"all"   },
+  { path:"/uptime",     label:"Uptime Monitor", icon:"📡", role:"all"   },
+  { path:"/cve",        label:"CVE Scanner",    icon:"🛡", role:"all"   },
+  { path:"/reports",    label:"Reports",        icon:"📄", role:"all"   },
+  { path:"/audit",      label:"Audit Log",      icon:"🔐", role:"all"   },
+  { path:"/users",      label:"Users",          icon:"👥", role:"admin",  divider:true },
+  { path:"/whitelabel", label:"Branding",       icon:"🎨", role:"admin" },
+  { path:"/settings",   label:"Settings",       icon:"⚙",  role:"admin" },
+  { path:"/demo",       label:"Demo Script",    icon:"🎬", role:"admin",  divider:true },
 ];
 
 export default function Sidebar() {
   const { pathname }     = useLocation();
   const { user, logout } = useAuth();
   const { brand }        = useBrand();
-  const primary = brand?.primary_color || "#00bcd4";
+  const primary          = brand?.primary_color || "#00bcd4";
+  const role             = user?.role || "viewer";
+
+  const visibleNav = NAV_ALL.filter(item => {
+    if (item.role === "all")   return true;
+    if (item.role === "admin") return role === "admin";
+    return true;
+  });
 
   return (
     <aside style={{
@@ -43,7 +50,7 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav style={{ flex:1, padding:"10px 0", overflowY:"auto" }}>
-        {NAV.map(({ path, label, icon, divider }) => {
+        {visibleNav.map(({ path, label, icon, divider }) => {
           const active = pathname === path;
           return (
             <div key={path}>
@@ -78,8 +85,7 @@ export default function Sidebar() {
                         gap:"10px", marginBottom:"10px" }}>
             <div style={{
               width:"30px", height:"30px", borderRadius:"50%",
-              background:"#0a2a2a",
-              border:`1px solid ${primary}`,
+              background:"#0a2a2a", border:`1px solid ${primary}`,
               display:"flex", alignItems:"center",
               justifyContent:"center",
               color:primary, fontSize:"12px",
@@ -101,14 +107,10 @@ export default function Sidebar() {
             </div>
           </div>
           <button onClick={logout}
-            onMouseOver={e=>{
-              e.target.style.color="#f44336";
-              e.target.style.borderColor="#f44336";
-            }}
-            onMouseOut={e=>{
-              e.target.style.color="#333";
-              e.target.style.borderColor="#1a1a2e";
-            }}
+            onMouseOver={e=>{e.target.style.color="#f44336";
+                             e.target.style.borderColor="#f44336"}}
+            onMouseOut={e=>{e.target.style.color="#333";
+                            e.target.style.borderColor="#1a1a2e"}}
             style={{
               width:"100%", padding:"6px",
               background:"transparent", color:"#333",

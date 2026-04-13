@@ -9,6 +9,7 @@ _dashboards: list[WebSocket]      = []
 async def agent_endpoint(websocket: WebSocket, token: str):
     from db import SessionLocal, Machine, Metric, Alert
     from notifications import notify_critical_alert
+    from alert_cooldown import should_create_alert
 
     await websocket.accept()
     _agents[token] = websocket
@@ -27,18 +28,19 @@ async def agent_endpoint(websocket: WebSocket, token: str):
     finally:
         db.close()
 
-    print(f"[WS] Agent connected: {hostname} (machine_id={machine_id})")
+    print(f"[WS] Agent connected: {hostname} (id={machine_id})")
 
     try:
         while True:
-            raw  = await websocket.receive_text()
-            data = json.loads(raw)
+            raw      = await websocket.receive_text()
+            data     = json.loads(raw)
             msg_type = data.get("type")
 
             if msg_type == "metrics":
                 db = SessionLocal()
                 try:
-                    m = db.query(Machine).filter(Machine.token == token).first()
+                    m = db.query(Machine)\
+                          .filter(Machine.token == token).first()
                     if m:
                         m.last_seen = datetime.utcnow()
                         m.status    = "online"
@@ -52,40 +54,42 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                         )
                         db.add(metric)
 
-                        # Alert checks with notifications
-                        alerts_to_add = []
                         cpu  = data.get("cpu",  0)
                         ram  = data.get("ram",  0)
                         disk = data.get("disk", 0)
+                        alerts_to_add = []
 
-                        if cpu > 85:
+                        # CPU alert with cooldown
+                        if cpu > 85 and should_create_alert(m.id, "cpu"):
+                            level = "critical" if cpu > 95 else "warning"
                             alerts_to_add.append(Alert(
-                                machine_id=m.id, level="warning",
+                                machine_id=m.id, level=level,
                                 type="cpu",
-                                message=f"CPU at {cpu:.1f}%"))
+                                message=f"CPU at {cpu:.1f}% on {m.hostname}"))
                             if cpu > 95:
-                                asyncio.create_task(
-                                    asyncio.to_thread(
-                                        notify_critical_alert,
-                                        m.hostname, "cpu",
-                                        f"CPU at {cpu:.1f}%"
-                                    ))
-                        if ram > 85:
+                                asyncio.create_task(asyncio.to_thread(
+                                    notify_critical_alert,
+                                    m.hostname, "cpu",
+                                    f"CPU at {cpu:.1f}%"))
+
+                        # RAM alert with cooldown
+                        if ram > 85 and should_create_alert(m.id, "ram"):
+                            level = "critical" if ram > 95 else "warning"
                             alerts_to_add.append(Alert(
-                                machine_id=m.id, level="warning",
+                                machine_id=m.id, level=level,
                                 type="ram",
-                                message=f"RAM at {ram:.1f}%"))
-                        if disk > 90:
+                                message=f"RAM at {ram:.1f}% on {m.hostname}"))
+
+                        # Disk alert with cooldown
+                        if disk > 90 and should_create_alert(m.id, "disk"):
                             alerts_to_add.append(Alert(
                                 machine_id=m.id, level="critical",
                                 type="disk",
-                                message=f"Disk at {disk:.1f}%"))
-                            asyncio.create_task(
-                                asyncio.to_thread(
-                                    notify_critical_alert,
-                                    m.hostname, "disk",
-                                    f"Disk at {disk:.1f}%"
-                                ))
+                                message=f"Disk at {disk:.1f}% on {m.hostname}"))
+                            asyncio.create_task(asyncio.to_thread(
+                                notify_critical_alert,
+                                m.hostname, "disk",
+                                f"Disk at {disk:.1f}%"))
 
                         for a in alerts_to_add:
                             db.add(a)
@@ -129,7 +133,7 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                     db.close()
 
             elif msg_type == "ping":
-                await websocket.send_text(json.dumps({"type": "pong"}))
+                await websocket.send_text(json.dumps({"type":"pong"}))
 
     except WebSocketDisconnect:
         pass
@@ -139,15 +143,16 @@ async def agent_endpoint(websocket: WebSocket, token: str):
         _agents.pop(token, None)
         db = SessionLocal()
         try:
-            m = db.query(Machine).filter(Machine.token == token).first()
+            m = db.query(Machine)\
+                  .filter(Machine.token == token).first()
             if m:
                 m.status = "offline"
                 db.commit()
                 from notifications import notify_machine_offline
-                asyncio.create_task(
-                    asyncio.to_thread(
-                        notify_machine_offline, m.hostname, m.ip
-                    ))
+                from alert_cooldown import should_create_alert
+                if should_create_alert(m.id, "offline"):
+                    asyncio.create_task(asyncio.to_thread(
+                        notify_machine_offline, m.hostname, m.ip))
                 await _broadcast_dashboards({
                     "type":       "status",
                     "machine_id": m.id,
@@ -196,25 +201,25 @@ async def offline_watchdog():
     from db import SessionLocal, Machine, Alert
     from datetime import timedelta
     from notifications import notify_machine_offline
+    from alert_cooldown import should_create_alert
     while True:
         await asyncio.sleep(30)
         db = SessionLocal()
         try:
             cutoff = datetime.utcnow() - timedelta(seconds=35)
             stale  = db.query(Machine).filter(
-                Machine.status == "online",
+                Machine.status   == "online",
                 Machine.last_seen < cutoff
             ).all()
             for m in stale:
                 m.status = "offline"
-                db.add(Alert(
-                    machine_id=m.id, level="critical",
-                    type="offline",
-                    message=f"{m.hostname} went offline"))
-                asyncio.create_task(
-                    asyncio.to_thread(
-                        notify_machine_offline, m.hostname, m.ip
-                    ))
+                if should_create_alert(m.id, "offline"):
+                    db.add(Alert(
+                        machine_id=m.id, level="critical",
+                        type="offline",
+                        message=f"{m.hostname} went offline"))
+                    asyncio.create_task(asyncio.to_thread(
+                        notify_machine_offline, m.hostname, m.ip))
                 await _broadcast_dashboards({
                     "type":       "status",
                     "machine_id": m.id,

@@ -13,6 +13,11 @@ export default function Reports() {
     setToast(msg); setTimeout(() => setToast(""), 4000);
   };
 
+  // Build a quick lookup: machine_id → hostname
+  const machineMap = Object.fromEntries(
+    machines.map(m => [m.id, m.hostname])
+  );
+
   useEffect(() => {
     getMachines().then(r => setMachines(r.data));
     getReports().then(r  => setReports(r.data));
@@ -34,6 +39,7 @@ export default function Reports() {
   };
 
   const handleDelete = async (id) => {
+    if (!window.confirm("Delete this report?")) return;
     await deleteReport(id);
     setReports(prev => prev.filter(r => r.id !== id));
     showToast("Report deleted");
@@ -55,6 +61,7 @@ export default function Reports() {
         Compliance Reports
       </h1>
 
+      {/* Generate */}
       <div style={{
         background:"#13131f", border:"1px solid #2a2a3e",
         borderRadius:"10px", padding:"20px", marginBottom:"24px"
@@ -91,6 +98,7 @@ export default function Reports() {
         </div>
       </div>
 
+      {/* List */}
       <div style={{
         background:"#13131f", border:"1px solid #2a2a3e",
         borderRadius:"10px", padding:"20px"
@@ -100,7 +108,8 @@ export default function Reports() {
           GENERATED REPORTS ({reports.length})
         </div>
         {reports.length === 0 ? (
-          <div style={{ color:"#666", fontSize:"13px" }}>
+          <div style={{ color:"#666", fontSize:"13px",
+                        padding:"20px 0" }}>
             No reports yet. Generate one above.
           </div>
         ) : (
@@ -108,7 +117,7 @@ export default function Reports() {
                           fontSize:"13px" }}>
             <thead>
               <tr style={{ color:"#666" }}>
-                {["Filename","Size","Created","Actions"].map(h => (
+                {["Machine","Filename","Size","Generated","Actions"].map(h => (
                   <th key={h} style={{ textAlign:"left", padding:"8px",
                                        borderBottom:"1px solid #2a2a3e" }}>
                     {h}
@@ -118,30 +127,45 @@ export default function Reports() {
             </thead>
             <tbody>
               {reports.map(r => (
-                <tr key={r.id} style={{ borderBottom:"1px solid #1a1a2e" }}>
-                  <td style={{ padding:"8px", color:"#e0e0e0" }}>
+                <tr key={r.id}
+                  style={{ borderBottom:"1px solid #1a1a2e" }}>
+                  {/* ✅ Fixed: show hostname not machine_id */}
+                  <td style={{ padding:"8px", color:"#00bcd4",
+                               fontWeight:600 }}>
+                    {machineMap[r.machine_id] || `Machine ${r.machine_id}`}
+                  </td>
+                  <td style={{ padding:"8px", color:"#e0e0e0",
+                               fontSize:"11px", maxWidth:"200px",
+                               overflow:"hidden", textOverflow:"ellipsis",
+                               whiteSpace:"nowrap" }}>
                     {r.filename}
                   </td>
-                  <td style={{ padding:"8px", color:"#666" }}>{r.size_kb} KB</td>
                   <td style={{ padding:"8px", color:"#666" }}>
-                    {r.created_at?.slice(0,16)}
+                    {r.size_kb} KB
+                  </td>
+                  <td style={{ padding:"8px", color:"#666" }}>
+                    {r.created_at?.slice(0,16).replace("T"," ")}
                   </td>
                   <td style={{ padding:"8px" }}>
                     <div style={{ display:"flex", gap:"8px" }}>
-                      <a href={downloadReport(r.id)} target="_blank"
-                         rel="noreferrer" style={{
+                      <a href={downloadReport(r.id)}
+                         target="_blank" rel="noreferrer"
+                         style={{
                            padding:"4px 12px",
                            background:"#1a1a2e", color:"#00bcd4",
-                           border:"1px solid #00bcd4", borderRadius:"6px",
-                           fontSize:"12px", textDecoration:"none"
+                           border:"1px solid #00bcd4",
+                           borderRadius:"6px", fontSize:"12px",
+                           textDecoration:"none"
                          }}>
-                        Download
+                        ⬇ Download
                       </a>
-                      <button onClick={() => handleDelete(r.id)} style={{
-                        padding:"4px 12px", background:"#1a1a2e",
-                        color:"#f44336", border:"1px solid #f44336",
-                        borderRadius:"6px", fontSize:"12px", cursor:"pointer"
-                      }}>
+                      <button onClick={() => handleDelete(r.id)}
+                        style={{
+                          padding:"4px 12px", background:"#1a1a2e",
+                          color:"#f44336", border:"1px solid #f44336",
+                          borderRadius:"6px", fontSize:"12px",
+                          cursor:"pointer"
+                        }}>
                         Delete
                       </button>
                     </div>

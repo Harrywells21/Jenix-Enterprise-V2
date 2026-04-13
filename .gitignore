@@ -1,10 +1,31 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
-.env
-*.db
+*.pyd
 venv/
+.venv/
+*.egg-info/
+
+# Environment
+.env
+!.env.example
+
+# Database
+*.db
+*.sqlite3
+
+# Node
 node_modules/
 dashboard/build/
+
+# Generated files
 server/reports/
-*.zip
+server/whitelabel.json
+jenix_backup_*.zip
+jenix_enterprise_*.zip
+jenix_pre_sprint_*.zip
+
+# Logs
+*.log
+.jenix/
