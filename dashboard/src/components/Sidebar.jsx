@@ -8,38 +8,36 @@ const NAV = [
   { path:"/uptime",     label:"Uptime Monitor", icon:"📡" },
   { path:"/cve",        label:"CVE Scanner",    icon:"🛡" },
   { path:"/reports",    label:"Reports",        icon:"📄" },
-  { path:"/audit",      label:"Audit Log",      icon:"🔐", divider:false },
-  { path:"/users",      label:"Users",          icon:"👥", divider:true  },
+  { path:"/audit",      label:"Audit Log",      icon:"🔐" },
+  { path:"/users",      label:"Users",          icon:"👥", divider:true },
   { path:"/whitelabel", label:"Branding",       icon:"🎨" },
   { path:"/settings",   label:"Settings",       icon:"⚙"  },
+  { path:"/demo",       label:"Demo Script",    icon:"🎬", divider:true },
 ];
 
 export default function Sidebar() {
   const { pathname }     = useLocation();
   const { user, logout } = useAuth();
   const { brand }        = useBrand();
+  const primary = brand?.primary_color || "#00bcd4";
 
   return (
     <aside style={{
       width:"220px", minWidth:"220px",
-      background: brand.sidebar_bg || "#0d0d1a",
+      background: brand?.sidebar_bg || "#0d0d1a",
       borderRight:"1px solid #1a1a2e",
       display:"flex", flexDirection:"column"
     }}>
       {/* Logo */}
       <div style={{ padding:"22px 24px",
                     borderBottom:"1px solid #1a1a2e" }}>
-        <div style={{
-          color:      brand.primary_color || "#00bcd4",
-          fontSize:   "20px",
-          fontWeight: 900,
-          letterSpacing:"3px"
-        }}>
-          {brand.logo_text || "JENIX"}
+        <div style={{ color:primary, fontSize:"20px",
+                      fontWeight:900, letterSpacing:"3px" }}>
+          {brand?.logo_text || "JENIX"}
         </div>
         <div style={{ color:"#333", fontSize:"10px",
                       marginTop:"2px", letterSpacing:"1px" }}>
-          {brand.logo_subtext || "ENTERPRISE v2.0"}
+          {brand?.logo_subtext || "ENTERPRISE v2.0"}
         </div>
       </div>
 
@@ -47,7 +45,6 @@ export default function Sidebar() {
       <nav style={{ flex:1, padding:"10px 0", overflowY:"auto" }}>
         {NAV.map(({ path, label, icon, divider }) => {
           const active = pathname === path;
-          const primary = brand.primary_color || "#00bcd4";
           return (
             <div key={path}>
               {divider && (
@@ -74,7 +71,7 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* User + footer */}
+      {/* User */}
       <div style={{ borderTop:"1px solid #1a1a2e" }}>
         <div style={{ padding:"14px 20px" }}>
           <div style={{ display:"flex", alignItems:"center",
@@ -82,11 +79,11 @@ export default function Sidebar() {
             <div style={{
               width:"30px", height:"30px", borderRadius:"50%",
               background:"#0a2a2a",
-              border:`1px solid ${brand.primary_color || "#00bcd4"}`,
+              border:`1px solid ${primary}`,
               display:"flex", alignItems:"center",
               justifyContent:"center",
-              color: brand.primary_color || "#00bcd4",
-              fontSize:"12px", fontWeight:700, flexShrink:0
+              color:primary, fontSize:"12px",
+              fontWeight:700, flexShrink:0
             }}>
               {user?.name?.[0]?.toUpperCase() || "A"}
             </div>
@@ -104,11 +101,11 @@ export default function Sidebar() {
             </div>
           </div>
           <button onClick={logout}
-            onMouseOver={e => {
+            onMouseOver={e=>{
               e.target.style.color="#f44336";
               e.target.style.borderColor="#f44336";
             }}
-            onMouseOut={e => {
+            onMouseOut={e=>{
               e.target.style.color="#333";
               e.target.style.borderColor="#1a1a2e";
             }}
@@ -122,8 +119,8 @@ export default function Sidebar() {
             Sign Out
           </button>
         </div>
-        {brand.powered_by && (
-          <div style={{ textAlign:"center", padding:"8px",
+        {brand?.powered_by && (
+          <div style={{ textAlign:"center", padding:"6px",
                         color:"#222", fontSize:"10px",
                         borderTop:"1px solid #1a1a2e" }}>
             Powered by JENIX
