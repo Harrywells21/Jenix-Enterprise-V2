@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { BrandProvider }         from "./context/BrandContext";
+import ErrorBoundary    from "./components/ErrorBoundary";
+import MobileSidebar    from "./components/MobileSidebar";
 import Landing    from "./pages/Landing";
 import Login      from "./pages/Login";
 import Fleet      from "./pages/Fleet";
@@ -25,10 +27,25 @@ function Layout({ children }) {
   return (
     <div style={{ display:"flex", height:"100vh",
                   overflow:"hidden", background:"#0d0d1a" }}>
-      <Sidebar />
-      <main style={{ flex:1, overflowY:"auto", padding:"28px" }}>
-        {children}
+      {/* Desktop sidebar */}
+      <div style={{ display:"flex" }} className="desktop-sidebar">
+        <Sidebar />
+      </div>
+      {/* Mobile sidebar */}
+      <MobileSidebar />
+      <main style={{ flex:1, overflowY:"auto", padding:"28px" }}
+            className="main-content">
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
       </main>
+      <style>{`
+        @media (max-width: 800px) {
+          .desktop-sidebar { display: none !important; }
+          .main-content { padding: 16px !important;
+                          padding-top: 60px !important; }
+        }
+      `}</style>
     </div>
   );
 }

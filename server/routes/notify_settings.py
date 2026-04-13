@@ -73,3 +73,33 @@ def get_notify(_: User = Depends(require_admin)):
         "slack_configured": bool(vals.get("SLACK_WEBHOOK")),
         "teams_configured": bool(vals.get("TEAMS_WEBHOOK")),
     }
+
+
+class TestNotification(BaseModel):
+    type: str = "slack"  # slack, teams, email
+
+@router.post("/notifications/test")
+def test_notification(body: TestNotification,
+                      _: User = Depends(require_admin)):
+    from notifications import notify_slack, notify_teams, send_alert_email
+    try:
+        if body.type == "slack":
+            notify_slack(
+                "JENIX Test Notification",
+                "✅ Your Slack integration is working correctly!",
+                "info"
+            )
+        elif body.type == "teams":
+            notify_teams(
+                "JENIX Test Notification",
+                "✅ Your Teams integration is working correctly!",
+                "info"
+            )
+        elif body.type == "email":
+            send_alert_email(
+                "JENIX Test Notification",
+                "<b>✅ Your email integration is working correctly!</b>"
+            )
+        return {"ok": True, "message": f"Test {body.type} notification sent"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
