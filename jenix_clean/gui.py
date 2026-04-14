@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# JENIX v4.2 — Production-Grade Linux Optimization Framework
+# JENIX v4.2 Enterprise — Production-Grade Linux Optimization Framework
 # pip install customtkinter psutil matplotlib distro
 
 import subprocess, sys, os, re, shutil, threading, time, json, logging, hashlib
@@ -2017,7 +2017,7 @@ class FixView(ctk.CTkFrame):
         self.log.pack(fill="x",pady=(0,4))
         self.log.write("INFO","Fix engine ready — " + distro.label)
         if _HAS_FIX_ENGINE:
-            self.log.write("OK","FixEngine v4.2 loaded — AUTO FIX available")
+            self.log.write("OK","FixEngine v4.2 Enterprise loaded — AUTO FIX available")
         else:
             self.log.write("WARN","FixEngine not available — using legacy fix mode")
 
@@ -3061,7 +3061,7 @@ PAGE_META = {
     "boost":    ("System Boost",      "Gaming & Work modes · cross-distro","▶ BOOST",     CYAN,   [("adaptive", CYAN)]),
     "clean":    ("Deep Clean",        "Preview + selective delete",        "◻ SCAN",      CYAN,   [("preview", GREEN)]),
     "secure":   ("Security Scan",     "Ports · SSH · firewall · SUID",     "🔒 SCAN",     CYAN,   [("full audit", CYAN)]),
-    "fix":      ("Fix System",        "Detect & repair issues · AUTO FIX", "🚀 AUTO FIX", PURPLE, [("auto-fix", GREEN), ("v4.2", PURPLE)]),
+    "fix":      ("Fix System",        "Detect & repair issues · AUTO FIX", "🚀 AUTO FIX", PURPLE, [("auto-fix", GREEN), ("Enterprise", PURPLE)]),
     "graph":    ("Performance Graph", "Live CPU · RAM · I/O · Net",        "⏸ PAUSE",     AMBER,  [("LIVE", GREEN)]),
     "rollback": ("Rollback Manager",  f"Tracked: {rollback.count} actions","↩ ROLLBACK",  AMBER,  [("undo", AMBER)]),
     "ai":       ("AI Recommendations","Prioritised suggestions",           "★ ANALYSE",   CYAN,   [("adaptive", CYAN)]),
@@ -3118,7 +3118,7 @@ class Sidebar(ctk.CTkFrame):
 
         ctk.CTkFrame(self, fg_color="transparent").pack(fill="both", expand=True)
         ctk.CTkLabel(
-            self, text="v4.2",
+            self, text="v4.2 Enterprise",
             font=("Courier New", 7), text_color=T2
         ).pack(pady=(0, 8))
 
@@ -3368,7 +3368,7 @@ class TopBar(ctk.CTkFrame):
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         sections.append("\n".join([
             "=" * 64,
-            "        JENIX v4.2  —  AI FORENSIC INTELLIGENCE REPORT",
+            "        JENIX v4.2 Enterprise  —  AI FORENSIC INTELLIGENCE REPORT",
             "=" * 64,
             f"  Generated : {now_str}",
             f"  Distro    : {distro.label}",
@@ -3659,10 +3659,10 @@ class ScanView(ctk.CTkFrame):
 
         self.log = LogBox(scroll, height=140)
         self.log.pack(fill="x", pady=(0, 4))
-        self.log.write("INFO", f"JENIX v4.2 · {distro.label}")
+        self.log.write("INFO", f"JENIX v4.2 Enterprise · {distro.label}")
         self.log.write("INFO", f"Logs: {AUDIT_LOG}")
         if _HAS_FIX_ENGINE:
-            self.log.write("OK", "FixEngine v4.2 loaded — 🚀 AUTO FIX is available after scanning")
+            self.log.write("OK", "FixEngine v4.2 Enterprise loaded — 🚀 AUTO FIX is available after scanning")
         self.log.write("INFO", "Click ▶ SCAN SYSTEM to begin")
 
     def _quick_autofix(self):
@@ -4005,7 +4005,7 @@ class JenixApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title(f"JENIX v4.2  ·  {distro.name}")
+        self.title(f"JENIX v4.2 Enterprise  ·  {distro.name}")
         self.geometry("1160x780")
         self.minsize(900, 600)
         self.resizable(True, True)
@@ -4033,7 +4033,7 @@ class JenixApp(ctk.CTk):
 
         self._build()
 
-        _log("info", "JENIX v4.2 started")
+        _log("info", "JENIX v4.2 Enterprise started — Local Mode")
 
         self.after(500, self._startup_snapshot)
         self.after(800, lambda: self._emit_startup_logs())
@@ -4180,7 +4180,7 @@ class JenixApp(ctk.CTk):
 
 
 if __name__ == "__main__":
-    _log("info", f"JENIX v4.2 · {distro.label} · pid={os.getpid()}")
+    _log("info", f"JENIX v4.2 Enterprise · {distro.label} · pid={os.getpid()}")
     app = JenixApp()
 
     try:
