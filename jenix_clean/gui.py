@@ -3192,7 +3192,7 @@ class TopBar(ctk.CTkFrame):
         ctk.CTkLabel(nc, text="JENIX", font=("Courier New", 15, "bold"), text_color=CYAN).pack(anchor="w")
         ctk.CTkLabel(
             nc,
-            text=f"v4.2 · {distro.name.split()[0].upper()} · {distro.family.upper()}",
+            text=f"v4.2 Enterprise · {distro.name.split()[0].upper()} · LOCAL MODE",
             font=("Courier New", 8),
             text_color=T2
         ).pack(anchor="w")
