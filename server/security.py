@@ -35,8 +35,9 @@ def check_rate_limit(key: str, max_req: int,
     _rate_store[key].append(now)
     return True
 
-def rate_limit_login(ip: str) -> bool:
-    return check_rate_limit(f"login:{ip}", 10, 60)
+def rate_limit_login(ip: str, username: str = "") -> bool:
+    key = f"login:{ip}:{username}" if username else f"login:{ip}"
+    return check_rate_limit(key, 10, 60)
 
 def rate_limit_api(ip: str) -> bool:
     return check_rate_limit(f"api:{ip}", 300, 60)

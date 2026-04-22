@@ -780,7 +780,30 @@ function AddMachineWizard({onClose,token,toast}){
           os==='Linux'?'🐧 Linux':'macOS'?'🍎 macOS':'🪟 Windows',
           ' — Open a terminal and run:'
         ),
-        h('div',{style:{fontSize:12,color:'#5a8ab0',marginBottom:14}},'Copy the command below and paste it in a terminal on the machine you want to add.'),
+        h('div',{style:{fontSize:12,color:'#5a8ab0',marginBottom:14}},'Choose how to install the agent on your machine:'),
+        h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}},
+          h('a',{
+            href: os==='Linux'
+              ? 'https://github.com/Harrywells21/Jenix-Enterprise/releases/download/v1.0.0/JenixAgent-linux'
+              : os==='Windows'
+              ? 'https://github.com/Harrywells21/Jenix-Enterprise/releases/download/v1.0.0/JenixAgent-windows.exe'
+              : 'https://github.com/Harrywells21/Jenix-Enterprise/releases/download/v1.0.0/JenixAgent-macos',
+            target:'_blank',
+            style:{background:'#1a3a6f',color:'#7ac',borderRadius:10,padding:'14px',textAlign:'center',textDecoration:'none',display:'block',border:'1px solid #2a4a8f'}
+          },
+            h('div',{style:{fontSize:24,marginBottom:4}},'⬇'),
+            h('div',{style:{fontWeight:700,fontSize:13}},'Download Agent'),
+            h('div',{style:{fontSize:10,color:'#5a8ab0',marginTop:2}},'Double-click to run')
+          ),
+          h('div',{
+            style:{background:'#0a1e35',color:'#5a8ab0',borderRadius:10,padding:'14px',textAlign:'center',border:'1px solid #1a3050'}
+          },
+            h('div',{style:{fontSize:24,marginBottom:4}},'⚡'),
+            h('div',{style:{fontWeight:700,fontSize:13,color:'#e0f0ff'}},'Or use command line'),
+            h('div',{style:{fontSize:10,marginTop:2}},'Advanced users only')
+          )
+        ),
+        h('div',{style:{fontSize:12,color:'#5a8ab0',marginBottom:8}},'Command line option:'),
         h('div',{style:S.codeBox},
           h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
             h('span',{style:{fontSize:10,color:'#3a6090',fontFamily:'monospace'}},os==='Windows'?'PowerShell (Admin)':'Terminal'),
