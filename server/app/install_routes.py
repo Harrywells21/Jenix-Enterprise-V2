@@ -131,3 +131,18 @@ async def upload_static(filename: str, request: Request):
 @router.get("/api/agent/ping")
 async def agent_ping():
     return {"status": "ok", "server": SERVER}
+@router.get("/api/agent/install", response_class=PlainTextResponse)
+@router.get("/install", response_class=PlainTextResponse)  
+async def universal_install(request: Request):
+    """Smart installer - detects OS from User-Agent and serves correct script"""
+    ua = request.headers.get("user-agent", "").lower()
+    
+    if "powershell" in ua or "windows" in ua:
+        # Redirect to Windows installer
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/api/agent/install/windows")
+    elif "darwin" in ua or "mac" in ua:
+        return RedirectResponse("/api/agent/install/macos")  
+    else:
+        # Default to Linux
+        return RedirectResponse("/api/agent/install/linux")
