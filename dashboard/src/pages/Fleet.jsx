@@ -1,527 +1,561 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { getFleetOverview, getSavings,
-         getAllAlerts, markAllRead, fleetCommand,
-         connectDashboardWS } from "../api";
+import { getFleetOverview, getAllAlerts, markAllRead, fleetCommand, getSavings } from "../api";
 
-// ── Stat Card ──────────────────────────────────────────────────────────────
-function StatCard({ label, value, sub, color="#00bcd4", icon, danger }) {
+/* ── Stat Card ── */
+function StatCard({ label, value, sub, accent, icon, delay = 0 }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => { setTimeout(() => setVisible(true), delay); }, [delay]);
+
   return (
     <div style={{
-      background: danger ? "#1a0a0a" : "#13131f",
-      border: `1px solid ${danger ? "#f44336" : "#2a2a3e"}`,
-      borderRadius:"12px", padding:"20px",
-      display:"flex", flexDirection:"column", gap:"6px"
+      background: "#0c1220",
+      border: "1px solid rgba(255,255,255,0.06)",
+      borderRadius: "14px",
+      padding: "22px",
+      position: "relative",
+      overflow: "hidden",
+      opacity: visible ? 1 : 0,
+      transform: visible ? "translateY(0)" : "translateY(16px)",
+      transition: "opacity 0.5s cubic-bezier(0.16,1,0.3,1), transform 0.5s cubic-bezier(0.16,1,0.3,1), border-color 0.2s",
+      cursor: "default",
+    }}
+    onMouseOver={e => {
+      e.currentTarget.style.borderColor = `${accent}30`;
+      e.currentTarget.style.boxShadow = `0 0 30px ${accent}10`;
+    }}
+    onMouseOut={e => {
+      e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)";
+      e.currentTarget.style.boxShadow = "none";
     }}>
-      <div style={{ display:"flex", justifyContent:"space-between",
-                    alignItems:"center" }}>
-        <span style={{ color:"#666", fontSize:"12px",
-                       fontWeight:600, textTransform:"uppercase",
-                       letterSpacing:"0.5px" }}>
-          {label}
-        </span>
-        <span style={{ fontSize:"20px" }}>{icon}</span>
-      </div>
-      <div style={{ color, fontSize:"32px", fontWeight:800,
-                    lineHeight:1 }}>
-        {value}
-      </div>
+      {/* Top accent bar */}
+      <div style={{
+        position: "absolute", top: 0, left: "20%", right: "20%", height: "1px",
+        background: `linear-gradient(90deg, transparent, ${accent}60, transparent)`,
+      }}/>
+      {/* Icon bg */}
+      <div style={{
+        position: "absolute", top: "16px", right: "16px",
+        width: "36px", height: "36px",
+        background: `${accent}12`,
+        borderRadius: "10px",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: "16px",
+      }}>{icon}</div>
+
+      <div style={{
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: "9px", fontWeight: 500,
+        color: "rgba(122,143,166,0.6)",
+        letterSpacing: "0.2em", textTransform: "uppercase",
+        marginBottom: "10px",
+      }}>{label}</div>
+
+      <div style={{
+        fontFamily: "'Syne', sans-serif",
+        fontSize: "36px", fontWeight: 800,
+        color: accent, lineHeight: 1,
+        letterSpacing: "-0.02em",
+      }}>{value}</div>
+
       {sub && (
-        <div style={{ color:"#666", fontSize:"12px" }}>{sub}</div>
+        <div style={{
+          marginTop: "8px", fontSize: "12px",
+          color: "rgba(122,143,166,0.6)",
+          fontFamily: "'JetBrains Mono', monospace",
+        }}>{sub}</div>
       )}
     </div>
   );
 }
 
-// ── Health Score Ring ──────────────────────────────────────────────────────
-function ScoreRing({ score, color, size=60 }) {
-  const r   = (size/2) - 5;
-  const circ = 2 * Math.PI * r;
-  const fill = (score / 100) * circ;
-  return (
-    <svg width={size} height={size} style={{ transform:"rotate(-90deg)" }}>
-      <circle cx={size/2} cy={size/2} r={r}
-        fill="none" stroke="#1a1a2e" strokeWidth="5"/>
-      <circle cx={size/2} cy={size/2} r={r}
-        fill="none" stroke={color} strokeWidth="5"
-        strokeDasharray={`${fill} ${circ}`}
-        strokeLinecap="round"
-        style={{ transition:"stroke-dasharray 0.8s ease" }}/>
-      <text x={size/2} y={size/2}
-        textAnchor="middle" dominantBaseline="central"
-        fill={color} fontSize="13" fontWeight="bold"
-        style={{ transform:`rotate(90deg) translate(0, -${size}px)` }}>
-      </text>
-    </svg>
-  );
-}
+/* ── Alert Item ── */
+function AlertItem({ alert, onDismiss }) {
+  const sev = alert.severity || "info";
+  const colors = {
+    critical: { bg: "rgba(244,63,94,0.08)", border: "rgba(244,63,94,0.25)", text: "#f43f5e", dot: "#f43f5e" },
+    warning:  { bg: "rgba(245,158,11,0.08)", border: "rgba(245,158,11,0.2)",  text: "#f59e0b", dot: "#f59e0b" },
+    info:     { bg: "rgba(56,189,248,0.06)", border: "rgba(56,189,248,0.15)", text: "#38bdf8", dot: "#38bdf8" },
+  };
+  const c = colors[sev] || colors.info;
 
-// ── Machine Score Card ─────────────────────────────────────────────────────
-function MachineScoreCard({ machine, onClick }) {
-  return (
-    <div onClick={onClick} style={{
-      background:"#13131f",
-      border:`1px solid ${machine.score < 50 ? "#f44336"
-                        : machine.score < 80 ? "#ffb300" : "#2a2a3e"}`,
-      borderRadius:"10px", padding:"16px",
-      cursor:"pointer", transition:"all 0.2s",
-      display:"flex", alignItems:"center", gap:"16px"
-    }}>
-      {/* Score ring */}
-      <div style={{ position:"relative", flexShrink:0 }}>
-        <ScoreRing score={machine.score} color={machine.color} size={56} />
-        <div style={{
-          position:"absolute", top:"50%", left:"50%",
-          transform:"translate(-50%,-50%)",
-          color: machine.color, fontSize:"12px", fontWeight:700
-        }}>
-          {machine.score}
-        </div>
-      </div>
-
-      {/* Info */}
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ display:"flex", alignItems:"center",
-                      gap:"8px", marginBottom:"4px" }}>
-          <span style={{ color:"#e0e0e0", fontWeight:700,
-                         fontSize:"14px" }}>
-            {machine.hostname}
-          </span>
-          <span style={{
-            padding:"2px 8px", borderRadius:"20px",
-            fontSize:"10px", fontWeight:600,
-            background: machine.status==="online" ? "#0a2a0a" : "#2a0a0a",
-            color:      machine.status==="online" ? "#4caf50" : "#f44336",
-          }}>
-            {machine.status==="online" ? "● Online" : "● Offline"}
-          </span>
-        </div>
-        <div style={{ color:"#666", fontSize:"11px", marginBottom:"6px" }}>
-          {machine.ip} · {machine.os_name}
-        </div>
-        <div style={{ display:"flex", gap:"12px" }}>
-          {[
-            { label:"CPU",  value:machine.cpu,  color:"#00bcd4" },
-            { label:"RAM",  value:machine.ram,  color:"#ffb300" },
-            { label:"Disk", value:machine.disk, color:"#4caf50" },
-          ].map(({ label, value, color }) => (
-            <div key={label} style={{ fontSize:"11px" }}>
-              <span style={{ color:"#666" }}>{label}: </span>
-              <span style={{ color, fontWeight:600 }}>
-                {value?.toFixed(1)}%
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Grade */}
-      <div style={{
-        color: machine.color, fontSize:"11px",
-        fontWeight:700, textAlign:"right", flexShrink:0
-      }}>
-        {machine.grade}
-      </div>
-    </div>
-  );
-}
-
-// ── Alert Badge ────────────────────────────────────────────────────────────
-function AlertItem({ alert }) {
-  const icon = alert.level === "critical" ? "🔴" : "🟡";
   return (
     <div style={{
-      display:"flex", alignItems:"flex-start", gap:"10px",
-      padding:"10px 0",
-      borderBottom:"1px solid #1a1a2e"
+      display: "flex", alignItems: "flex-start", gap: "12px",
+      padding: "14px 16px",
+      background: c.bg, border: `1px solid ${c.border}`,
+      borderRadius: "10px", marginBottom: "8px",
+      transition: "opacity 0.2s",
     }}>
-      <span style={{ fontSize:"14px", flexShrink:0 }}>{icon}</span>
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ color:"#e0e0e0", fontSize:"12px",
-                      fontWeight:600 }}>
-          {alert.hostname}
-        </div>
-        <div style={{ color:"#aaa", fontSize:"11px",
-                      marginTop:"2px" }}>
+      <div style={{
+        width: "7px", height: "7px", borderRadius: "50%",
+        background: c.dot, flexShrink: 0, marginTop: "5px",
+        boxShadow: sev === "critical" ? `0 0 8px ${c.dot}` : "none",
+      }}/>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: "13px", color: "#e8f0fe", fontWeight: 500, marginBottom: "3px" }}>
           {alert.message}
         </div>
+        <div style={{
+          fontSize: "11px", color: "rgba(122,143,166,0.6)",
+          fontFamily: "'JetBrains Mono', monospace",
+          display: "flex", gap: "10px",
+        }}>
+          <span style={{ color: c.text, textTransform: "uppercase", letterSpacing: "0.06em" }}>{sev}</span>
+          <span>·</span>
+          <span>{alert.machine_hostname || "fleet"}</span>
+          <span>·</span>
+          <span>{new Date(alert.created_at || Date.now()).toLocaleTimeString()}</span>
+        </div>
       </div>
-      <div style={{ color:"#444", fontSize:"10px",
-                    flexShrink:0 }}>
-        {alert.timestamp?.slice(11,16)}
-      </div>
+      {onDismiss && (
+        <button onClick={() => onDismiss(alert.id)} style={{
+          background: "none", border: "none",
+          color: "rgba(122,143,166,0.4)", cursor: "pointer",
+          fontSize: "16px", padding: "0", lineHeight: 1,
+          flexShrink: 0,
+        }}>×</button>
+      )}
     </div>
   );
 }
 
-// ── Main Fleet Dashboard ───────────────────────────────────────────────────
+/* ── Command Button ── */
+function CmdButton({ icon, label, desc, onClick, accent = "#38bdf8" }) {
+  const [hov, setHov] = useState(false);
+  const [active, setActive] = useState(false);
+
+  return (
+    <button
+      onClick={() => { setActive(true); onClick(); setTimeout(() => setActive(false), 1500); }}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        background: hov ? `${accent}10` : "rgba(255,255,255,0.02)",
+        border: `1px solid ${hov ? accent + "40" : "rgba(255,255,255,0.06)"}`,
+        borderRadius: "12px", padding: "18px 16px",
+        cursor: "pointer", textAlign: "left",
+        transition: "all 0.2s cubic-bezier(0.16,1,0.3,1)",
+        transform: hov ? "translateY(-2px)" : "translateY(0)",
+        boxShadow: hov ? `0 8px 24px ${accent}15` : "none",
+      }}
+    >
+      <div style={{ fontSize: "22px", marginBottom: "8px" }}>{active ? "⟳" : icon}</div>
+      <div style={{
+        fontSize: "13px", fontWeight: 700, color: hov ? accent : "#e8f0fe",
+        marginBottom: "4px", fontFamily: "'Syne', sans-serif",
+        transition: "color 0.2s",
+      }}>{active ? "Executing..." : label}</div>
+      <div style={{
+        fontSize: "11px", color: "rgba(122,143,166,0.5)",
+        fontFamily: "'JetBrains Mono', monospace",
+        lineHeight: 1.4,
+      }}>{desc}</div>
+    </button>
+  );
+}
+
 export default function Fleet() {
-  const navigate  = useNavigate();
-  const [fleet,   setFleet]   = useState(null);
-  const [savings, setSavings] = useState(null);
-  const [alerts,  setAlerts]  = useState([]);
-  const [toast,   setToast]   = useState("");
-  const [sending, setSending] = useState("");
-  const wsRef = useRef(null);
+  const [overview,  setOverview]  = useState(null);
+  const [alerts,    setAlerts]    = useState([]);
+  const [savings,   setSavings]   = useState(null);
+  const [toast,     setToast]     = useState(null);
+  const [cmdOutput, setCmdOutput] = useState([]);
+  const [tab,       setTab]       = useState("alerts");
+  const navigate = useNavigate();
 
-  const showToast = (msg) => {
-    setToast(msg); setTimeout(() => setToast(""), 4000);
-  };
-
-  const load = () => {
-    getFleetOverview().then(r => setFleet(r.data)).catch(console.error);
-    getSavings().then(r       => setSavings(r.data)).catch(console.error);
-    getAllAlerts().then(r      => setAlerts(r.data.slice(0,10))).catch(console.error);
+  const showToast = (msg, type = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
   };
 
   useEffect(() => {
-    load();
-    const interval = setInterval(load, 15_000);
-
-    wsRef.current = connectDashboardWS((msg) => {
-      if (msg.type === "metrics" || msg.type === "status") {
-        load();
-      }
-    });
-
-    return () => {
-      clearInterval(interval);
-      wsRef.current?.close();
+    const load = () => {
+      getFleetOverview().then(r => setOverview(r.data)).catch(() => {});
+      getAllAlerts().then(r => setAlerts(r.data?.alerts || r.data || [])).catch(() => {});
+      getSavings().then(r => setSavings(r.data)).catch(() => {});
     };
+    load();
+    const iv = setInterval(load, 15_000);
+    return () => clearInterval(iv);
   }, []);
 
-  const handleFleetCommand = async (cmd) => {
-    if (!window.confirm(`Run ${cmd.toUpperCase()} on ALL online machines?`))
-      return;
-    setSending(cmd);
+  const handleCommand = async (type) => {
     try {
-      const r = await fleetCommand(cmd);
-      showToast(`✅ ${cmd.toUpperCase()} sent to ${r.data.sent} machines`);
-      setTimeout(load, 2000);
+      const r = await fleetCommand(type, []);
+      const line = `[${new Date().toLocaleTimeString()}] ${type.toUpperCase()} dispatched → ${r.data?.dispatched || 0} nodes`;
+      setCmdOutput(p => [line, ...p.slice(0, 19)]);
+      showToast(`${type} command sent to all online nodes`, "success");
     } catch (e) {
-      showToast(`❌ ${e.response?.data?.detail || e.message}`);
-    } finally {
-      setSending("");
+      showToast(e.response?.data?.detail || e.message, "error");
     }
   };
 
-  const handleMarkAllRead = async () => {
-    await markAllRead();
-    setAlerts([]);
-    load();
-    showToast("✅ All alerts marked as read");
-  };
+  const stats = [
+    {
+      label: "Total Machines",
+      value: overview?.total_machines ?? "—",
+      sub: `${overview?.online_machines ?? 0} online · ${(overview?.total_machines ?? 0) - (overview?.online_machines ?? 0)} offline`,
+      accent: "#38bdf8", icon: "⬡", delay: 0,
+    },
+    {
+      label: "Fleet CPU",
+      value: overview?.avg_cpu != null ? `${overview.avg_cpu.toFixed(1)}%` : "—",
+      sub: "Average across all machines",
+      accent: overview?.avg_cpu > 80 ? "#f43f5e" : overview?.avg_cpu > 60 ? "#f59e0b" : "#10b981",
+      icon: "⚡", delay: 80,
+    },
+    {
+      label: "Fleet RAM",
+      value: overview?.avg_ram != null ? `${overview.avg_ram.toFixed(1)}%` : "—",
+      sub: "Average across all machines",
+      accent: overview?.avg_ram > 85 ? "#f43f5e" : overview?.avg_ram > 70 ? "#f59e0b" : "#10b981",
+      icon: "◫", delay: 160,
+    },
+    {
+      label: "Critical Alerts",
+      value: alerts.filter(a => a.severity === "critical").length || "—",
+      sub: `${alerts.length} total · ${alerts.filter(a => a.severity === "warning").length} warnings`,
+      accent: alerts.filter(a => a.severity === "critical").length > 0 ? "#f43f5e" : "#10b981",
+      icon: "⚠", delay: 240,
+    },
+    {
+      label: "Commands Today",
+      value: overview?.commands_today ?? "—",
+      sub: "Automated operations run",
+      accent: "#8b5cf6", icon: "▷", delay: 320,
+    },
+    {
+      label: "Annual Savings",
+      value: savings?.estimated_savings
+        ? `$${(savings.estimated_savings / 1000).toFixed(0)}k`
+        : overview?.estimated_savings
+          ? `$${Math.round(overview.estimated_savings).toLocaleString()}`
+          : "—",
+      sub: "~$45/hr in manual labor",
+      accent: "#10b981", icon: "◈", delay: 400,
+    },
+  ];
 
-  if (!fleet) return (
-    <div style={{ display:"flex", alignItems:"center",
-                  justifyContent:"center", height:"60vh" }}>
-      <div style={{ color:"#00bcd4", fontSize:"14px" }}>
-        Loading fleet data...
-      </div>
-    </div>
-  );
-
-  const unread_critical = alerts.filter(
-    a => a.level === "critical" && !a.is_read).length;
+  const critical = alerts.filter(a => a.severity === "critical");
 
   return (
-    <div>
+    <div style={{
+      fontFamily: "'Cabinet Grotesk', sans-serif",
+      color: "#e8f0fe",
+      minHeight: "100%",
+    }}>
       {/* Toast */}
       {toast && (
         <div style={{
-          position:"fixed", top:"20px", right:"20px",
-          background:"#1a1a2e", border:"1px solid #2a2a3e",
-          borderRadius:"8px", padding:"12px 20px",
-          color:"#e0e0e0", fontSize:"13px", zIndex:1000,
-          boxShadow:"0 4px 20px rgba(0,0,0,0.5)"
-        }}>{toast}</div>
+          position: "fixed", top: "24px", right: "24px", zIndex: 9999,
+          padding: "12px 18px",
+          background: toast.type === "error" ? "rgba(244,63,94,0.12)" : "rgba(16,185,129,0.12)",
+          border: `1px solid ${toast.type === "error" ? "rgba(244,63,94,0.3)" : "rgba(16,185,129,0.3)"}`,
+          borderRadius: "10px", color: toast.type === "error" ? "#f43f5e" : "#10b981",
+          fontSize: "13px",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          animation: "fadeIn 0.3s ease",
+          display: "flex", alignItems: "center", gap: "8px",
+          fontFamily: "'JetBrains Mono', monospace",
+        }}>
+          {toast.type === "error" ? "✗" : "✓"} {toast.msg}
+        </div>
       )}
 
-      {/* Header */}
-      <div style={{ display:"flex", justifyContent:"space-between",
-                    alignItems:"flex-start", marginBottom:"24px" }}>
+      {/* Page Header */}
+      <div style={{ marginBottom: "28px", display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
-          <h1 style={{ color:"#e0e0e0", fontSize:"24px",
-                       fontWeight:800, marginBottom:"4px" }}>
+          <div style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: "10px", color: "rgba(56,189,248,0.6)",
+            letterSpacing: "0.2em", textTransform: "uppercase",
+            marginBottom: "6px",
+          }}>
+            Operations Center
+          </div>
+          <h1 style={{
+            fontFamily: "'Syne', sans-serif",
+            fontSize: "28px", fontWeight: 800,
+            color: "#e8f0fe", letterSpacing: "-0.02em",
+            lineHeight: 1,
+          }}>
             Fleet Command Center
           </h1>
-          <div style={{ color:"#666", fontSize:"13px" }}>
+          <p style={{
+            color: "rgba(122,143,166,0.7)", fontSize: "14px", marginTop: "6px",
+          }}>
             Real-time overview of your entire Linux infrastructure
-          </div>
+          </p>
         </div>
-        {/* Fleet action buttons */}
-        <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
-          {["scan","boost","clean"].map(cmd => (
-            <button key={cmd}
-              onClick={() => handleFleetCommand(cmd)}
-              disabled={!!sending}
-              style={{
-                padding:"8px 16px",
-                background: sending===cmd ? "#1a1a2e" : "#1a1a2e",
-                color:  sending===cmd ? "#444"
-                      : cmd==="scan"  ? "#00bcd4"
-                      : cmd==="boost" ? "#ffb300" : "#4caf50",
-                border:`1px solid ${
-                  sending===cmd ? "#2a2a3e"
-                  : cmd==="scan"  ? "#00bcd4"
-                  : cmd==="boost" ? "#ffb300" : "#4caf50"}`,
-                borderRadius:"8px", fontWeight:700,
-                fontSize:"12px", cursor: sending ? "not-allowed" : "pointer",
-                textTransform:"capitalize"
-              }}>
-              {sending===cmd ? "Sending..." : `⚡ ${cmd} ALL`}
-            </button>
-          ))}
+
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <button
+            onClick={() => handleCommand("scan")}
+            style={{
+              padding: "9px 16px",
+              background: "rgba(56,189,248,0.08)",
+              border: "1px solid rgba(56,189,248,0.2)",
+              borderRadius: "8px", color: "#38bdf8",
+              fontSize: "12px", fontWeight: 600,
+              cursor: "pointer", fontFamily: "'Cabinet Grotesk', sans-serif",
+              letterSpacing: "0.04em", transition: "all 0.2s",
+            }}
+            onMouseOver={e => { e.currentTarget.style.background = "rgba(56,189,248,0.15)"; }}
+            onMouseOut={e => { e.currentTarget.style.background = "rgba(56,189,248,0.08)"; }}
+          >⚡ Scan ALL</button>
+          <button
+            onClick={() => handleCommand("boost")}
+            style={{
+              padding: "9px 16px",
+              background: "rgba(16,185,129,0.08)",
+              border: "1px solid rgba(16,185,129,0.2)",
+              borderRadius: "8px", color: "#10b981",
+              fontSize: "12px", fontWeight: 600,
+              cursor: "pointer", fontFamily: "'Cabinet Grotesk', sans-serif",
+              letterSpacing: "0.04em", transition: "all 0.2s",
+            }}
+            onMouseOver={e => { e.currentTarget.style.background = "rgba(16,185,129,0.15)"; }}
+            onMouseOut={e => { e.currentTarget.style.background = "rgba(16,185,129,0.08)"; }}
+          >⚡ Boost ALL</button>
+          <button
+            onClick={() => handleCommand("clean")}
+            style={{
+              padding: "9px 16px",
+              background: "rgba(245,158,11,0.08)",
+              border: "1px solid rgba(245,158,11,0.2)",
+              borderRadius: "8px", color: "#f59e0b",
+              fontSize: "12px", fontWeight: 600,
+              cursor: "pointer", fontFamily: "'Cabinet Grotesk', sans-serif",
+              letterSpacing: "0.04em", transition: "all 0.2s",
+            }}
+            onMouseOver={e => { e.currentTarget.style.background = "rgba(245,158,11,0.15)"; }}
+            onMouseOut={e => { e.currentTarget.style.background = "rgba(245,158,11,0.08)"; }}
+          >⚡ Clean ALL</button>
         </div>
       </div>
 
-      {/* Critical alert banner */}
-      {unread_critical > 0 && (
+      {/* Critical Alert Banner */}
+      {critical.length > 0 && (
         <div style={{
-          background:"#1a0505",
-          border:"1px solid #f44336",
-          borderRadius:"10px", padding:"14px 20px",
-          marginBottom:"20px",
-          display:"flex", alignItems:"center",
-          justifyContent:"space-between"
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "14px 18px", marginBottom: "24px",
+          background: "rgba(244,63,94,0.07)",
+          border: "1px solid rgba(244,63,94,0.25)",
+          borderRadius: "12px",
+          animation: "fadeIn 0.4s ease",
         }}>
-          <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
-            <span style={{ fontSize:"20px" }}>🚨</span>
-            <span style={{ color:"#f44336", fontWeight:700, fontSize:"14px" }}>
-              {unread_critical} Critical Alert{unread_critical>1?"s":""} Require Immediate Attention
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{
+              width: "8px", height: "8px", borderRadius: "50%",
+              background: "#f43f5e", boxShadow: "0 0 10px #f43f5e",
+              animation: "pulse 1.5s infinite",
+            }}/>
+            <span style={{
+              color: "#f43f5e", fontWeight: 700, fontSize: "14px",
+              fontFamily: "'Syne', sans-serif",
+            }}>
+              {critical.length} Critical Alert{critical.length > 1 ? "s" : ""} Require Immediate Attention
             </span>
           </div>
-          <button onClick={handleMarkAllRead} style={{
-            padding:"6px 14px", background:"transparent",
-            color:"#f44336", border:"1px solid #f44336",
-            borderRadius:"6px", fontSize:"12px", cursor:"pointer"
-          }}>
-            Mark All Read
-          </button>
+          <button
+            onClick={() => markAllRead().then(() => setAlerts([]))}
+            style={{
+              padding: "6px 14px",
+              background: "rgba(244,63,94,0.12)",
+              border: "1px solid rgba(244,63,94,0.3)",
+              borderRadius: "6px", color: "#f43f5e",
+              fontSize: "12px", cursor: "pointer",
+              fontFamily: "'Cabinet Grotesk', sans-serif",
+            }}
+          >Mark All Read</button>
         </div>
       )}
 
-      {/* Stat Cards Row */}
-      <div style={{ display:"grid",
-                    gridTemplateColumns:"repeat(4, 1fr)",
-                    gap:"12px", marginBottom:"20px" }}>
-        <StatCard label="Total Machines" value={fleet.total}
-          icon="🖥" color="#00bcd4"
-          sub={`${fleet.online} online · ${fleet.offline} offline`}/>
-        <StatCard label="Fleet CPU" value={`${fleet.avg_cpu}%`}
-          icon="⚡" color="#00bcd4"
-          sub="Average across all machines"
-          danger={fleet.avg_cpu > 85}/>
-        <StatCard label="Fleet RAM" value={`${fleet.avg_ram}%`}
-          icon="💾" color="#ffb300"
-          sub="Average across all machines"
-          danger={fleet.avg_ram > 85}/>
-        <StatCard label="Critical Alerts" value={fleet.critical_alerts}
-          icon="🚨"
-          color={fleet.critical_alerts > 0 ? "#f44336" : "#4caf50"}
-          sub={`${fleet.warning_alerts} warnings`}
-          danger={fleet.critical_alerts > 0}/>
-      </div>
-
-      {/* Second row */}
-      <div style={{ display:"grid",
-                    gridTemplateColumns:"repeat(4, 1fr)",
-                    gap:"12px", marginBottom:"24px" }}>
-        <StatCard label="Fleet Disk" value={`${fleet.avg_disk}%`}
-          icon="💽" color="#4caf50"
-          sub="Average usage"
-          danger={fleet.avg_disk > 85}/>
-        <StatCard label="Commands Today" value={fleet.commands_24h}
-          icon="🔧" color="#9c27b0"
-          sub="Automated operations run"/>
-        <StatCard label="Hours Saved Today"
-          value={`${fleet.hours_saved}h`}
-          icon="⏱" color="#00bcd4"
-          sub={`~$${(fleet.hours_saved * 45).toFixed(0)} in labor`}/>
-        <StatCard label="Annual Savings"
-          value={savings ? `$${savings.annual_savings.toLocaleString()}` : "..."}
-          icon="💰" color="#4caf50"
-          sub="Estimated vs manual ops"/>
-      </div>
-
-      {/* Main content grid */}
-      <div style={{ display:"grid",
-                    gridTemplateColumns:"1fr 340px",
-                    gap:"16px", marginBottom:"20px" }}>
-
-        {/* Machine health scores */}
-        <div style={{
-          background:"#13131f", border:"1px solid #2a2a3e",
-          borderRadius:"12px", padding:"20px"
-        }}>
-          <div style={{ display:"flex", justifyContent:"space-between",
-                        alignItems:"center", marginBottom:"16px" }}>
-            <div style={{ color:"#aaa", fontSize:"12px",
-                          fontWeight:600 }}>
-              MACHINE HEALTH SCORES
-              <span style={{ color:"#444", marginLeft:"8px",
-                             fontWeight:400 }}>
-                sorted by health (worst first)
-              </span>
-            </div>
-            <button onClick={() => navigate("/")}
-              style={{
-                background:"none", border:"none",
-                color:"#00bcd4", cursor:"pointer",
-                fontSize:"12px"
-              }}>
-              View All →
-            </button>
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-            {fleet.machine_scores.length === 0 ? (
-              <div style={{ color:"#666", fontSize:"13px",
-                            textAlign:"center", padding:"40px 0" }}>
-                No machines connected yet.
-              </div>
-            ) : (
-              fleet.machine_scores.map(m => (
-                <MachineScoreCard key={m.id} machine={m}
-                  onClick={() => navigate(`/machines/${m.id}`)} />
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Alerts panel */}
-        <div style={{
-          background:"#13131f", border:"1px solid #2a2a3e",
-          borderRadius:"12px", padding:"20px",
-          display:"flex", flexDirection:"column"
-        }}>
-          <div style={{ display:"flex", justifyContent:"space-between",
-                        alignItems:"center", marginBottom:"12px" }}>
-            <div style={{ color:"#aaa", fontSize:"12px", fontWeight:600 }}>
-              RECENT ALERTS
-            </div>
-            {alerts.length > 0 && (
-              <button onClick={handleMarkAllRead} style={{
-                background:"none", border:"none",
-                color:"#666", cursor:"pointer", fontSize:"11px"
-              }}>
-                Clear all
-              </button>
-            )}
-          </div>
-          <div style={{ flex:1, overflowY:"auto" }}>
-            {alerts.length === 0 ? (
-              <div style={{ color:"#4caf50", fontSize:"13px",
-                            textAlign:"center", padding:"40px 0" }}>
-                ✅ No active alerts
-              </div>
-            ) : (
-              alerts.map(a => <AlertItem key={a.id} alert={a} />)
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Activity Timeline */}
+      {/* Stats Grid */}
       <div style={{
-        background:"#13131f", border:"1px solid #2a2a3e",
-        borderRadius:"12px", padding:"20px"
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+        gap: "14px",
+        marginBottom: "28px",
       }}>
-        <div style={{ color:"#aaa", fontSize:"12px",
-                      fontWeight:600, marginBottom:"16px" }}>
-          ACTIVITY TIMELINE
-          <span style={{ color:"#444", marginLeft:"8px", fontWeight:400 }}>
-            last 20 actions across fleet
-          </span>
-        </div>
-        <div style={{ display:"flex", flexDirection:"column", gap:"0" }}>
-          {fleet.activity.map((a, i) => (
-            <div key={i} style={{
-              display:"flex", gap:"12px",
-              padding:"8px 0",
-              borderBottom: i < fleet.activity.length-1
-                ? "1px solid #1a1a2e" : "none"
-            }}>
-              <div style={{
-                width:"8px", height:"8px", borderRadius:"50%",
-                background: a.status==="ok" ? "#4caf50" : "#f44336",
-                flexShrink:0, marginTop:"5px"
-              }}/>
-              <div style={{ flex:1, minWidth:0 }}>
-                <span style={{ color:"#00bcd4", fontSize:"12px",
-                               fontWeight:600, textTransform:"capitalize" }}>
-                  {a.action}
-                </span>
-                <span style={{ color:"#aaa", fontSize:"12px",
-                               marginLeft:"8px" }}>
-                  {a.detail}
-                </span>
-              </div>
-              <div style={{ color:"#444", fontSize:"11px",
-                            flexShrink:0 }}>
-                {a.timestamp?.slice(0,16).replace("T"," ")}
-              </div>
-            </div>
-          ))}
-        </div>
+        {stats.map((s) => (
+          <StatCard key={s.label} {...s} />
+        ))}
       </div>
 
-      {/* Cost Savings Calculator */}
-      {savings && (
+      {/* Main Content Grid */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 380px",
+        gap: "20px",
+        marginBottom: "24px",
+      }}>
+        {/* Left — Tabs panel */}
         <div style={{
-          background:"linear-gradient(135deg, #0a1628 0%, #0d2137 100%)",
-          border:"1px solid #00bcd4",
-          borderRadius:"12px", padding:"24px",
-          marginTop:"16px"
+          background: "#0c1220",
+          border: "1px solid rgba(255,255,255,0.06)",
+          borderRadius: "14px",
+          overflow: "hidden",
         }}>
-          <div style={{ color:"#00bcd4", fontSize:"14px",
-                        fontWeight:700, marginBottom:"16px" }}>
-            💰 JENIX ROI CALCULATOR
-          </div>
-          <div style={{ display:"grid",
-                        gridTemplateColumns:"repeat(4,1fr)",
-                        gap:"16px" }}>
-            {[
-              { label:"This Week",
-                value:`$${savings.weekly_saved.toFixed(0)}`,
-                sub:`${savings.weekly_hours}h saved` },
-              { label:"This Month",
-                value:`$${savings.monthly_saved.toFixed(0)}`,
-                sub:`${savings.monthly_hours}h saved` },
-              { label:"Annual Projection",
-                value:`$${savings.annual_savings.toLocaleString()}`,
-                sub:"based on current usage" },
-              { label:"Payback Period",
-                value: savings.payback_months > 100
-                  ? "N/A*" : `${savings.payback_months}mo`,
-                sub: savings.payback_months > 100
-                  ? "*Run more operations to calculate"
-                  : "until license pays for itself" },
-            ].map(({ label, value, sub }) => (
-              <div key={label}>
-                <div style={{ color:"#666", fontSize:"11px",
-                              fontWeight:600, marginBottom:"4px" }}>
-                  {label}
-                </div>
-                <div style={{ color:"#00bcd4", fontSize:"22px",
-                              fontWeight:800 }}>
-                  {value}
-                </div>
-                <div style={{ color:"#444", fontSize:"11px",
-                              marginTop:"2px" }}>
-                  {sub}
-                </div>
-              </div>
+          {/* Tab bar */}
+          <div style={{
+            display: "flex",
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+            padding: "0 4px",
+          }}>
+            {["alerts", "command-log"].map(t => (
+              <button key={t}
+                onClick={() => setTab(t)}
+                style={{
+                  padding: "14px 20px", border: "none",
+                  background: "none", cursor: "pointer",
+                  fontSize: "12px", fontWeight: tab === t ? 700 : 400,
+                  color: tab === t ? "#38bdf8" : "rgba(122,143,166,0.5)",
+                  borderBottom: `2px solid ${tab === t ? "#38bdf8" : "transparent"}`,
+                  marginBottom: "-1px",
+                  fontFamily: "'Cabinet Grotesk', sans-serif",
+                  letterSpacing: "0.04em",
+                  transition: "all 0.2s",
+                  textTransform: "capitalize",
+                }}>
+                {t === "alerts" ? `Alerts ${alerts.length > 0 ? `(${alerts.length})` : ""}` : "Command Log"}
+              </button>
             ))}
           </div>
-          <div style={{ color:"#444", fontSize:"11px",
-                        marginTop:"16px", borderTop:"1px solid #1a2a3a",
-                        paddingTop:"12px" }}>
-            Calculated at ${savings.hourly_rate}/hr average sysadmin rate ·
-            {savings.monthly_commands} automated tasks this month ·
-            {savings.mins_per_task || 30} min saved per task
+
+          <div style={{ padding: "16px", maxHeight: "360px", overflowY: "auto" }}>
+            {tab === "alerts" && (
+              alerts.length === 0 ? (
+                <div style={{
+                  textAlign: "center", padding: "48px 0",
+                  color: "rgba(122,143,166,0.4)",
+                }}>
+                  <div style={{ fontSize: "28px", marginBottom: "8px" }}>✓</div>
+                  <div style={{ fontSize: "14px", fontWeight: 500, marginBottom: "4px" }}>All Systems Clear</div>
+                  <div style={{ fontSize: "12px", fontFamily: "'JetBrains Mono', monospace" }}>No active alerts</div>
+                </div>
+              ) : (
+                alerts.map(a => <AlertItem key={a.id || a.message} alert={a} />)
+              )
+            )}
+            {tab === "command-log" && (
+              cmdOutput.length === 0 ? (
+                <div style={{
+                  textAlign: "center", padding: "48px 0",
+                  color: "rgba(122,143,166,0.4)",
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: "12px",
+                }}>
+                  No commands executed yet
+                </div>
+              ) : (
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" }}>
+                  {cmdOutput.map((line, i) => (
+                    <div key={i} style={{
+                      padding: "8px 0",
+                      borderBottom: "1px solid rgba(255,255,255,0.04)",
+                      color: "rgba(56,189,248,0.8)",
+                    }}>
+                      <span style={{ color: "rgba(122,143,166,0.4)", marginRight: "8px" }}>›</span>
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
           </div>
         </div>
-      )}
+
+        {/* Right — Quick Commands */}
+        <div style={{
+          background: "#0c1220",
+          border: "1px solid rgba(255,255,255,0.06)",
+          borderRadius: "14px",
+          padding: "20px",
+        }}>
+          <div style={{
+            fontFamily: "'Syne', sans-serif",
+            fontSize: "14px", fontWeight: 700,
+            color: "#e8f0fe", marginBottom: "4px",
+          }}>Quick Commands</div>
+          <div style={{
+            fontSize: "11px", color: "rgba(122,143,166,0.5)",
+            fontFamily: "'JetBrains Mono', monospace",
+            marginBottom: "16px",
+          }}>Execute across all online nodes</div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+            {[
+              { icon: "🛡", label: "CVE Scan",    desc: "Full vulnerability audit",   type: "scan",    accent: "#38bdf8" },
+              { icon: "⚡", label: "Boost",       desc: "Optimize performance",       type: "boost",   accent: "#10b981" },
+              { icon: "🧹", label: "Clean",       desc: "Remove junk & temp files",   type: "clean",   accent: "#f59e0b" },
+              { icon: "📊", label: "Health",      desc: "System health report",       type: "report",  accent: "#8b5cf6" },
+              { icon: "🔄", label: "Restart Svc", desc: "Reload all services",        type: "restart", accent: "#f43f5e" },
+              { icon: "📋", label: "Collect Logs",desc: "Gather system logs",         type: "logs",    accent: "#38bdf8" },
+            ].map(cmd => (
+              <CmdButton key={cmd.type} {...cmd} onClick={() => handleCommand(cmd.type)} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Fleet Status Bar */}
+      <div style={{
+        background: "#0c1220",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderRadius: "14px",
+        padding: "16px 20px",
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between",
+        flexWrap: "wrap", gap: "12px",
+      }}>
+        {[
+          { label: "Fleet Disk",   value: overview?.avg_disk ? `${overview.avg_disk.toFixed(1)}%` : "—", accent: "#8b5cf6" },
+          { label: "Hours Saved",  value: overview?.hours_saved ? `${overview.hours_saved}h` : "—",      accent: "#10b981" },
+          { label: "Online",       value: `${overview?.online_machines ?? 0}/${overview?.total_machines ?? 0}`, accent: "#38bdf8" },
+          { label: "Uptime",       value: overview?.fleet_uptime || "99.9%", accent: "#10b981" },
+        ].map(({ label, value, accent }) => (
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <div>
+              <div style={{
+                fontSize: "10px", color: "rgba(122,143,166,0.5)",
+                fontFamily: "'JetBrains Mono', monospace",
+                letterSpacing: "0.12em", textTransform: "uppercase",
+              }}>{label}</div>
+              <div style={{
+                fontFamily: "'Syne', sans-serif",
+                fontSize: "20px", fontWeight: 800, color: accent,
+              }}>{value}</div>
+            </div>
+            <div style={{ width: "1px", height: "36px", background: "rgba(255,255,255,0.05)" }}/>
+          </div>
+        ))}
+
+        <button
+          onClick={() => navigate("/overview")}
+          style={{
+            padding: "9px 18px",
+            background: "rgba(56,189,248,0.08)",
+            border: "1px solid rgba(56,189,248,0.2)",
+            borderRadius: "8px", color: "#38bdf8",
+            fontSize: "13px", fontWeight: 600,
+            cursor: "pointer",
+            fontFamily: "'Cabinet Grotesk', sans-serif",
+            letterSpacing: "0.03em",
+            transition: "all 0.2s",
+          }}
+          onMouseOver={e => { e.currentTarget.style.background = "rgba(56,189,248,0.14)"; }}
+          onMouseOut={e => { e.currentTarget.style.background = "rgba(56,189,248,0.08)"; }}
+        >
+          View All Machines →
+        </button>
+      </div>
+
+      <style>{`
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;500&family=Cabinet+Grotesk:wght@400;500;600;700&display=swap');
+      `}</style>
     </div>
   );
 }

@@ -2,30 +2,32 @@
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
 venv/
-.venv/
 *.egg-info/
 
-# Environment
-.env
-!.env.example
-
-# Database
+# Database (contains real data)
 *.db
-*.sqlite3
+*.db-wal
+*.db-shm
+*.db.backup*
+
+# Environment (contains secrets)
+.env
+.env.local
+.env.production
+
+# Large files
+*.zip
+logs/
+*.log
 
 # Node
-node_modules/
+dashboard/node_modules/
 dashboard/build/
 
-# Generated files
-server/reports/
-server/whitelabel.json
-jenix_backup_*.zip
-jenix_enterprise_*.zip
-jenix_pre_sprint_*.zip
+# VirtualBox / OS
+.DS_Store
+Thumbs.db
 
-# Logs
-*.log
-.jenix/
+# Venv
+jenix_clean/venv/

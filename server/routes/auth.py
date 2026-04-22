@@ -28,9 +28,9 @@ class UserOut(BaseModel):
 def login(request: Request,
           form: OAuth2PasswordRequestForm = Depends(),
           db:   Session = Depends(get_db)):
-    # Rate limit by IP
+    # Rate limit by IP + username so one account can't block another
     client_ip = request.client.host if request.client else "unknown"
-    if not rate_limit_login(client_ip):
+    if not rate_limit_login(client_ip, form.username):
         raise HTTPException(status_code=429,
                             detail="Too many login attempts. Try again in 1 minute.")
     user = authenticate_user(form.username, form.password, db)

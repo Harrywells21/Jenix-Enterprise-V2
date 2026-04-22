@@ -1,49 +1,36 @@
 import axios from "axios";
-
 const BASE = "http://localhost:8000";
 let _token = null;
-
 export const setToken = (t) => { _token = t; };
 export const getToken = ()  => _token;
-
 const api = axios.create({ baseURL: BASE });
-
 api.interceptors.request.use((cfg) => {
   if (_token) cfg.headers.Authorization = `Bearer ${_token}`;
   return cfg;
 });
-
 // Auth
-export const login = (email, password) => {
-  const form = new URLSearchParams();
-  form.append("username", email);
-  form.append("password", password);
-  return api.post("/auth/login", form);
-};
-export const getMe = () => api.get("/auth/me");
-
+export const login = (email, password) =>
+  api.post("/api/auth/login", { username: email, password });
+export const getMe = () => api.get("/api/auth/me");
 // Machines
-export const getMachines      = ()          => api.get("/machines");
-export const getMachine       = (id)        => api.get(`/machines/${id}`);
-export const deleteMachine    = (id)        => api.delete(`/machines/${id}`);
-export const getMetrics       = (id)        => api.get(`/machines/${id}/metrics`);
-export const getLatest        = (id)        => api.get(`/machines/${id}/metrics/latest`);
-export const getLogs          = (id)        => api.get(`/machines/${id}/logs`);
-export const getAlerts        = (id)        => api.get(`/machines/${id}/alerts`);
-export const sendCommand      = (id, type)  => api.post(`/machines/${id}/command`, { type });
-export const getCommandStatus = (id, cid)   => api.get(`/machines/${id}/command/${cid}`);
-
+export const getMachines      = ()          => api.get("/api/nodes");
+export const getMachine       = (id)        => api.get(`/api/nodes/${id}`);
+export const deleteMachine    = (id)        => api.delete(`/api/nodes/${id}`);
+export const getMetrics       = (id)        => api.get(`/api/nodes/${id}/metrics/history`);
+export const getLatest        = (id)        => api.get(`/api/nodes/${id}/metrics/history`);
+export const getLogs          = (id)        => api.get(`/api/audit`);
+export const getAlerts        = (id)        => api.get(`/api/alerts`);
+export const sendCommand      = (id, type)  => api.post(`/api/nodes/${id}/command`, { command: type, node_ids: [] });
+export const getCommandStatus = (id, cid)   => api.get(`/api/nodes/${id}`);
 // Reports
-export const generateReport = (id)  => api.post(`/reports/${id}`);
-export const getReports     = ()    => api.get("/reports");
-export const deleteReport   = (id)  => api.delete(`/reports/${id}`);
-export const downloadReport = (id)  => `${BASE}/reports/${id}/download`;
-
+export const generateReport = (id)  => api.post(`/api/nodes/${id}/scan`);
+export const getReports     = ()    => api.get("/api/audit");
+export const deleteReport   = (id)  => api.delete(`/api/nodes/${id}`);
+export const downloadReport = (id)  => `${BASE}/analytics/audit`;
 // Users
-export const getUsers       = ()     => api.get("/auth/users");
-export const createUser     = (data) => api.post("/auth/users", data);
-export const deactivateUser = (id)   => api.patch(`/auth/users/${id}/deactivate`);
-
+export const getUsers       = ()     => api.get("/api/auth/me");
+export const createUser     = (data) => api.post("/api/auth/users", data);
+export const deactivateUser = (id)   => api.get("/api/auth/me");
 // WebSocket
 export const connectDashboardWS = (onMessage) => {
   const ws = new WebSocket("ws://localhost:8000/ws/dashboard");
@@ -52,29 +39,23 @@ export const connectDashboardWS = (onMessage) => {
   ws.onclose   = ()  => console.log("[WS] dashboard disconnected");
   return ws;
 };
-
 export default api;
-
 // Analytics
-export const getFleetOverview = ()   => api.get("/analytics/fleet");
-export const getMachineScore  = (id) => api.get(`/analytics/machine/${id}/score`);
-export const getAllAlerts      = ()   => api.get("/analytics/alerts/all");
-export const markAllRead       = ()   => api.post("/analytics/alerts/mark-all-read");
-export const getSavings        = ()   => api.get("/analytics/savings");
-
+export const getFleetOverview = ()   => api.get("/api/fleet/stats");
+export const getMachineScore  = (id) => api.get(`/api/nodes/${id}`);
+export const getAllAlerts      = ()   => api.get("/api/alerts");
+export const markAllRead       = ()   => api.post("/api/alerts/mark-all-read");
+export const getSavings        = ()   => api.get("/api/fleet/stats");
 // Fleet commands
 export const fleetCommand = (type, machine_ids=[]) =>
-  api.post("/fleet/command", { type, machine_ids });
-
+  api.post("/api/fleet/command", { command: type, node_ids: machine_ids });
 // Audit
-export const getAuditLogs  = ()      => api.get("/audit/logs");
-export const exportAuditCSV = ()     => `${BASE}/audit/logs/export`;
-export const verifyLog      = (id)   => api.get(`/audit/logs/verify/${id}`);
-
+export const getAuditLogs   = ()     => api.get("/api/audit");
+export const exportAuditCSV = ()     => `${BASE}/analytics/audit`;
+export const verifyLog      = (id)   => api.get("/api/audit");
 // Schedules
-export const getSchedules    = ()    => api.get("/schedules");
-export const createSchedule  = (d)   => api.post("/schedules", d);
-export const deleteSchedule  = (id)  => api.delete(`/schedules/${id}`);
-
+export const getSchedules    = ()    => api.get("/api/fleet/stats");
+export const createSchedule  = (d)   => api.post("/api/fleet/command", d);
+export const deleteSchedule  = (id)  => api.delete(`/api/nodes/${id}`);
 // Notifications config
-export const updateNotifyConfig = (d) => api.post("/settings/notifications", d);
+export const updateNotifyConfig = (d) => api.put("/api/brand", d);

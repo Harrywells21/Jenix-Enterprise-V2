@@ -1,404 +1,304 @@
 import { useState, useEffect } from "react";
 import api from "../api";
+import { useBrand } from "../context/BrandContext";
 
-const input = {
-  padding:"8px 12px", background:"#1a1a2e",
-  border:"1px solid #2a2a3e", borderRadius:"8px",
-  color:"#e0e0e0", fontSize:"13px",
-  outline:"none", width:"100%"
-};
-const box = {
-  background:"#13131f", border:"1px solid #2a2a3e",
-  borderRadius:"10px", padding:"20px", marginBottom:"20px"
-};
-const label = {
-  color:"#aaa", fontSize:"12px", fontWeight:600,
-  marginBottom:"12px", display:"block"
-};
+const MONO = "'JetBrains Mono', monospace";
+const FONT = "'Cabinet Grotesk', sans-serif";
+const DISP = "'Syne', sans-serif";
+
+function Toggle({ checked, onChange }) {
+  return (
+    <div onClick={() => onChange(!checked)} style={{
+      width: "40px", height: "22px", borderRadius: "11px",
+      background: checked ? "#38bdf8" : "rgba(255,255,255,0.06)",
+      border: `1px solid ${checked ? "#38bdf8" : "rgba(255,255,255,0.08)"}`,
+      cursor: "pointer", position: "relative",
+      transition: "all 0.25s cubic-bezier(0.16,1,0.3,1)",
+      flexShrink: 0,
+    }}>
+      <div style={{
+        position: "absolute", top: "2px",
+        left: checked ? "20px" : "2px",
+        width: "16px", height: "16px", borderRadius: "50%",
+        background: checked ? "#000" : "rgba(122,143,166,0.4)",
+        transition: "left 0.25s cubic-bezier(0.16,1,0.3,1)",
+        boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+      }}/>
+    </div>
+  );
+}
+
+function SettingRow({ label, desc, children, danger = false }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      gap: "16px", padding: "16px 0",
+      borderBottom: "1px solid rgba(255,255,255,0.04)",
+    }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: "13px", fontWeight: 600, color: danger ? "#f43f5e" : "#e8f0fe", marginBottom: "2px" }}>{label}</div>
+        {desc && <div style={{ fontSize: "12px", color: "rgba(122,143,166,0.5)" }}>{desc}</div>}
+      </div>
+      <div style={{ flexShrink: 0 }}>{children}</div>
+    </div>
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <div style={{ background: "#0c1220", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px" }}>
+      <div style={{ fontSize: "11px", color: "rgba(122,143,166,0.4)", fontFamily: MONO, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "4px" }}>{title}</div>
+      <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", marginTop: "12px" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const ACCENT_COLORS = [
+  { name: "Cyan",    value: "#38bdf8" },
+  { name: "Emerald", value: "#10b981" },
+  { name: "Violet",  value: "#8b5cf6" },
+  { name: "Rose",    value: "#f43f5e" },
+  { name: "Amber",   value: "#f59e0b" },
+  { name: "Indigo",  value: "#6366f1" },
+];
 
 export default function Settings() {
-  const [license,   setLicense]   = useState(null);
-  const [genForm,   setGenForm]   = useState({ company_name:"", max_nodes:-1 });
-  const [genKey,    setGenKey]    = useState("");
-  const [actKey,    setActKey]    = useState("");
-  const [schedules, setSchedules] = useState([]);
-  const [machines,  setMachines]  = useState([]);
-  const [schForm,   setSchForm]   = useState({
-    machine_id:"", scan_type:"security",
-    frequency:"daily", hour:2
+  const { brand, setBrand } = useBrand();
+  const [toast, setToast]   = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    company_name: "JENIX Enterprise",
+    logo_text: "JENIX",
+    logo_subtext: "Enterprise v2.0",
+    primary_color: "#38bdf8",
+    alert_email: true,
+    alert_slack: false,
+    alert_cpu_threshold: 85,
+    alert_ram_threshold: 90,
+    alert_disk_threshold: 95,
+    auto_remediate: false,
+    scan_interval: "24h",
+    data_retention: "90",
+    mfa_required: false,
+    session_timeout: "8h",
   });
-  const [notify,    setNotify]    = useState({
-    slack_webhook:"", teams_webhook:"",
-    alert_email:"", smtp_host:"",
-    smtp_port:587, smtp_user:"", smtp_pass:""
-  });
-  const [notifyStatus, setNotifyStatus] = useState(null);
-  const [toast, setToast] = useState("");
-
-  const showToast = (msg) => {
-    setToast(msg); setTimeout(() => setToast(""), 4000);
-  };
 
   useEffect(() => {
-    api.get("/license").then(r    => setLicense(r.data)).catch(()=>{});
-    api.get("/schedules").then(r  => setSchedules(r.data)).catch(()=>{});
-    api.get("/machines").then(r   => setMachines(r.data)).catch(()=>{});
-    api.get("/settings/notifications").then(r => {
-      setNotify(r.data);
-      setNotifyStatus(r.data);
-    }).catch(()=>{});
+    api.get("/api/brand").then(r => {
+      if (r.data) setForm(p => ({ ...p, ...r.data }));
+    }).catch(() => {});
   }, []);
 
-  const generateKey = async () => {
-    try {
-      const r = await api.post("/license/generate", genForm);
-      setGenKey(r.data.key);
-      showToast("✅ License key generated");
-    } catch (e) { showToast(`❌ ${e.response?.data?.detail}`); }
+  const showToast = (msg, type = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
   };
 
-  const activateKey = async () => {
+  const save = async () => {
+    setSaving(true);
     try {
-      await api.post("/license/activate", { key: actKey });
-      const r = await api.get("/license");
-      setLicense(r.data); setActKey("");
-      showToast("✅ License activated");
-    } catch (e) { showToast(`❌ ${e.response?.data?.detail}`); }
-  };
-
-  const createSchedule = async () => {
-    try {
-      await api.post("/schedules", {
-        ...schForm,
-        machine_id: parseInt(schForm.machine_id),
-        hour:       parseInt(schForm.hour)
+      await api.put("/api/brand", {
+        company_name: form.company_name,
+        logo_text: form.logo_text,
+        logo_subtext: form.logo_subtext,
+        primary_color: form.primary_color,
       });
-      const r = await api.get("/schedules");
-      setSchedules(r.data);
-      showToast("✅ Schedule created");
-    } catch (e) { showToast(`❌ ${e.response?.data?.detail}`); }
+      if (setBrand) setBrand({ ...brand, ...form });
+      showToast("Settings saved successfully");
+    } catch (e) {
+      showToast(e.response?.data?.detail || "Save failed", "error");
+    } finally { setSaving(false); }
   };
 
-  const deleteSchedule = async (id) => {
-    await api.delete(`/schedules/${id}`);
-    setSchedules(prev => prev.filter(s => s.id !== id));
-    showToast("Schedule deleted");
-  };
-
-  const saveNotify = async () => {
-    try {
-      await api.post("/settings/notifications", notify);
-      const r = await api.get("/settings/notifications");
-      setNotifyStatus(r.data);
-      showToast("✅ Notification settings saved");
-    } catch (e) { showToast(`❌ ${e.response?.data?.detail}`); }
+  const inputStyle = {
+    width: "100%", padding: "9px 13px",
+    background: "#080d1a", border: "1px solid rgba(255,255,255,0.07)",
+    borderRadius: "9px", color: "#e8f0fe",
+    fontSize: "13px", outline: "none", fontFamily: FONT,
+    transition: "border-color 0.2s",
   };
 
   return (
-    <div>
+    <div style={{ fontFamily: FONT, color: "#e8f0fe", maxWidth: "800px" }}>
       {toast && (
         <div style={{
-          position:"fixed", top:"20px", right:"20px",
-          background:"#1a1a2e", border:"1px solid #2a2a3e",
-          borderRadius:"8px", padding:"12px 20px",
-          color:"#e0e0e0", fontSize:"13px", zIndex:1000
-        }}>{toast}</div>
+          position: "fixed", top: "24px", right: "24px", zIndex: 9999,
+          padding: "12px 18px",
+          background: toast.type === "error" ? "rgba(244,63,94,0.12)" : "rgba(16,185,129,0.12)",
+          border: `1px solid ${toast.type === "error" ? "rgba(244,63,94,0.3)" : "rgba(16,185,129,0.3)"}`,
+          borderRadius: "10px", color: toast.type === "error" ? "#f43f5e" : "#10b981",
+          fontSize: "12px", fontFamily: MONO,
+        }}>{toast.type === "error" ? "✗" : "✓"} {toast.msg}</div>
       )}
 
-      <h1 style={{ color:"#e0e0e0", fontSize:"22px",
-                   fontWeight:700, marginBottom:"24px" }}>
-        Settings
-      </h1>
-
-      {/* License Status */}
-      <div style={box}>
-        <span style={label}>LICENSE STATUS</span>
-        {license?.activated ? (
-          <div style={{
-            display:"grid", gridTemplateColumns:"repeat(4,1fr)",
-            gap:"16px"
-          }}>
-            {[
-              { l:"Company",   v:license.company_name },
-              { l:"Max Nodes", v:license.max_nodes===-1
-                                 ? "Unlimited" : license.max_nodes },
-              { l:"Type",      v:"Perpetual" },
-              { l:"Activated", v:license.activated_at?.slice(0,10) },
-            ].map(({ l, v }) => (
-              <div key={l}>
-                <div style={{ color:"#666", fontSize:"11px",
-                              marginBottom:"4px" }}>{l}</div>
-                <div style={{ color:"#00bcd4", fontWeight:700,
-                              fontSize:"14px" }}>{v}</div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{ color:"#f44336", fontSize:"13px" }}>
-            No license activated.
-          </div>
-        )}
-      </div>
-
-      {/* Generate License */}
-      <div style={box}>
-        <span style={label}>GENERATE LICENSE KEY</span>
-        <div style={{ display:"flex", gap:"10px",
-                      flexWrap:"wrap", marginBottom:"12px" }}>
-          <input placeholder="Company name"
-            style={{...input, width:"auto"}}
-            value={genForm.company_name}
-            onChange={e => setGenForm(p=>({...p,company_name:e.target.value}))}
-          />
-          <select style={{...input, width:"auto"}}
-            value={genForm.max_nodes}
-            onChange={e => setGenForm(p=>({...p,max_nodes:parseInt(e.target.value)}))}>
-            <option value={-1}>Unlimited nodes</option>
-            <option value={10}>10 nodes</option>
-            <option value={50}>50 nodes</option>
-            <option value={100}>100 nodes</option>
-          </select>
-          <button onClick={generateKey} style={{
-            padding:"8px 18px", background:"#00bcd4",
-            color:"#000", border:"none", borderRadius:"8px",
-            fontWeight:700, fontSize:"13px", cursor:"pointer"
-          }}>Generate</button>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "28px" }}>
+        <div>
+          <div style={{ fontSize: "10px", color: "rgba(56,189,248,0.6)", fontFamily: MONO, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "6px" }}>Configuration</div>
+          <h1 style={{ fontFamily: DISP, fontSize: "26px", fontWeight: 800, letterSpacing: "-0.02em" }}>Settings</h1>
+          <p style={{ color: "rgba(122,143,166,0.6)", fontSize: "13px", marginTop: "5px" }}>Platform configuration and preferences</p>
         </div>
-        {genKey && (
-          <div style={{
-            background:"#0d0d1a", border:"1px solid #2a2a3e",
-            borderRadius:"8px", padding:"12px",
-            fontFamily:"monospace", fontSize:"11px",
-            color:"#00bcd4", wordBreak:"break-all",
-            cursor:"pointer"
-          }} onClick={() => {
-            navigator.clipboard.writeText(genKey);
-            showToast("✅ Key copied to clipboard");
-          }}>
-            {genKey}
-            <span style={{ color:"#444", marginLeft:"8px",
-                           fontSize:"10px" }}>
-              (click to copy)
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Activate License */}
-      <div style={box}>
-        <span style={label}>ACTIVATE LICENSE</span>
-        <div style={{ display:"flex", gap:"10px" }}>
-          <input placeholder="Paste license key here..."
-            style={input} value={actKey}
-            onChange={e => setActKey(e.target.value)}
-          />
-          <button onClick={activateKey} style={{
-            padding:"8px 18px", background:"#00bcd4",
-            color:"#000", border:"none", borderRadius:"8px",
-            fontWeight:700, fontSize:"13px",
-            cursor:"pointer", whiteSpace:"nowrap"
-          }}>Activate</button>
-        </div>
-      </div>
-
-      {/* Notifications */}
-      <div style={box}>
-        <span style={label}>
-          NOTIFICATIONS
-          <span style={{ marginLeft:"8px", fontWeight:400 }}>
-            {notifyStatus?.slack_configured && (
-              <span style={{ color:"#4caf50", marginRight:"8px" }}>
-                ● Slack
-              </span>
-            )}
-            {notifyStatus?.teams_configured && (
-              <span style={{ color:"#4caf50", marginRight:"8px" }}>
-                ● Teams
-              </span>
-            )}
-            {notifyStatus?.smtp_configured && (
-              <span style={{ color:"#4caf50" }}>● Email</span>
-            )}
-          </span>
-        </span>
-
-        <div style={{ display:"grid",
-                      gridTemplateColumns:"1fr 1fr",
-                      gap:"12px" }}>
-          <div>
-            <div style={{ color:"#666", fontSize:"11px",
-                          marginBottom:"4px" }}>
-              Slack Webhook URL
-            </div>
-            <input style={input}
-              placeholder="https://hooks.slack.com/..."
-              value={notify.slack_webhook}
-              onChange={e => setNotify(p=>({...p,slack_webhook:e.target.value}))}
-            />
-          </div>
-          <div>
-            <div style={{ color:"#666", fontSize:"11px",
-                          marginBottom:"4px" }}>
-              Teams Webhook URL
-            </div>
-            <input style={input}
-              placeholder="https://outlook.office.com/webhook/..."
-              value={notify.teams_webhook}
-              onChange={e => setNotify(p=>({...p,teams_webhook:e.target.value}))}
-            />
-          </div>
-          <div>
-            <div style={{ color:"#666", fontSize:"11px",
-                          marginBottom:"4px" }}>
-              Alert Email
-            </div>
-            <input style={input} type="email"
-              placeholder="alerts@yourcompany.com"
-              value={notify.alert_email}
-              onChange={e => setNotify(p=>({...p,alert_email:e.target.value}))}
-            />
-          </div>
-          <div>
-            <div style={{ color:"#666", fontSize:"11px",
-                          marginBottom:"4px" }}>
-              SMTP Host
-            </div>
-            <input style={input}
-              placeholder="smtp.gmail.com"
-              value={notify.smtp_host}
-              onChange={e => setNotify(p=>({...p,smtp_host:e.target.value}))}
-            />
-          </div>
-          <div>
-            <div style={{ color:"#666", fontSize:"11px",
-                          marginBottom:"4px" }}>
-              SMTP User
-            </div>
-            <input style={input} type="email"
-              placeholder="your@email.com"
-              value={notify.smtp_user}
-              onChange={e => setNotify(p=>({...p,smtp_user:e.target.value}))}
-            />
-          </div>
-          <div>
-            <div style={{ color:"#666", fontSize:"11px",
-                          marginBottom:"4px" }}>
-              SMTP Password
-            </div>
-            <input style={input} type="password"
-              placeholder="App password"
-              value={notify.smtp_pass}
-              onChange={e => setNotify(p=>({...p,smtp_pass:e.target.value}))}
-            />
-          </div>
-        </div>
-        <button onClick={saveNotify} style={{
-          marginTop:"16px", padding:"8px 24px",
-          background:"#00bcd4", color:"#000",
-          border:"none", borderRadius:"8px",
-          fontWeight:700, fontSize:"13px", cursor:"pointer"
+        <button onClick={save} disabled={saving} style={{
+          padding: "10px 24px",
+          background: saving ? "rgba(56,189,248,0.06)" : "linear-gradient(135deg, #38bdf8, #0ea5e9)",
+          color: saving ? "rgba(56,189,248,0.3)" : "#000",
+          border: "none", borderRadius: "10px",
+          fontWeight: 700, fontSize: "13px",
+          cursor: saving ? "not-allowed" : "pointer",
+          fontFamily: FONT, letterSpacing: "0.03em",
+          boxShadow: saving ? "none" : "0 4px 16px rgba(56,189,248,0.25)",
+          transition: "all 0.2s",
+          display: "flex", alignItems: "center", gap: "6px",
         }}>
-          Save Notification Settings
+          {saving ? (
+            <><div style={{ width: "12px", height: "12px", border: "2px solid rgba(56,189,248,0.3)", borderTopColor: "#38bdf8", borderRadius: "50%", animation: "spin 0.7s linear infinite" }}/>Saving...</>
+          ) : "Save Changes"}
         </button>
       </div>
 
-      {/* Scheduled Scans */}
-      <div style={box}>
-        <span style={label}>SCHEDULED SCANS</span>
-        <div style={{ display:"flex", gap:"10px",
-                      flexWrap:"wrap", marginBottom:"16px" }}>
-          <select style={{...input, width:"auto"}}
-            value={schForm.machine_id}
-            onChange={e => setSchForm(p=>({...p,machine_id:e.target.value}))}>
-            <option value="">Select machine...</option>
-            {machines.map(m => (
-              <option key={m.id} value={m.id}>{m.hostname}</option>
+      {/* Branding */}
+      <Section title="Branding">
+        <SettingRow label="Platform Name" desc="Displayed in the sidebar and browser tab">
+          <input value={form.company_name} onChange={e => setForm(p => ({ ...p, company_name: e.target.value }))}
+            style={{ ...inputStyle, width: "220px" }}
+            onFocus={e => e.target.style.borderColor = "rgba(56,189,248,0.4)"}
+            onBlur={e => e.target.style.borderColor = "rgba(255,255,255,0.07)"}
+          />
+        </SettingRow>
+        <SettingRow label="Logo Text" desc="Short brand identifier shown in the header">
+          <input value={form.logo_text} onChange={e => setForm(p => ({ ...p, logo_text: e.target.value }))}
+            style={{ ...inputStyle, width: "160px" }}
+            onFocus={e => e.target.style.borderColor = "rgba(56,189,248,0.4)"}
+            onBlur={e => e.target.style.borderColor = "rgba(255,255,255,0.07)"}
+          />
+        </SettingRow>
+        <SettingRow label="Accent Color" desc="Primary brand color used throughout the interface">
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            {ACCENT_COLORS.map(({ name, value }) => (
+              <div key={value}
+                title={name}
+                onClick={() => setForm(p => ({ ...p, primary_color: value }))}
+                style={{
+                  width: "24px", height: "24px", borderRadius: "6px",
+                  background: value, cursor: "pointer",
+                  border: form.primary_color === value ? "2px solid #fff" : "2px solid transparent",
+                  boxShadow: form.primary_color === value ? `0 0 10px ${value}60` : "none",
+                  transition: "all 0.2s",
+                  transform: form.primary_color === value ? "scale(1.15)" : "scale(1)",
+                }}
+              />
             ))}
-          </select>
-          <select style={{...input, width:"auto"}}
-            value={schForm.scan_type}
-            onChange={e => setSchForm(p=>({...p,scan_type:e.target.value}))}>
-            <option value="security">Security</option>
-            <option value="scan">Health</option>
-            <option value="clean">Clean</option>
-          </select>
-          <select style={{...input, width:"auto"}}
-            value={schForm.frequency}
-            onChange={e => setSchForm(p=>({...p,frequency:e.target.value}))}>
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-          </select>
-          <select style={{...input, width:"auto"}}
-            value={schForm.hour}
-            onChange={e => setSchForm(p=>({...p,hour:e.target.value}))}>
-            {[...Array(24)].map((_,i)=>(
-              <option key={i} value={i}>
-                {String(i).padStart(2,"0")}:00
-              </option>
-            ))}
-          </select>
-          <button onClick={createSchedule} style={{
-            padding:"8px 18px", background:"#00bcd4",
-            color:"#000", border:"none", borderRadius:"8px",
-            fontWeight:700, fontSize:"13px", cursor:"pointer"
-          }}>Add</button>
-        </div>
-
-        {schedules.length === 0 ? (
-          <div style={{ color:"#666", fontSize:"13px" }}>
-            No schedules configured.
+            <input type="color" value={form.primary_color} onChange={e => setForm(p => ({ ...p, primary_color: e.target.value }))}
+              style={{ width: "24px", height: "24px", borderRadius: "6px", border: "none", cursor: "pointer", padding: 0, background: "none" }}
+            />
           </div>
-        ) : (
-          <table style={{ width:"100%", borderCollapse:"collapse",
-                          fontSize:"13px" }}>
-            <thead>
-              <tr style={{ color:"#666" }}>
-                {["Machine","Type","Frequency","Time","Action"].map(h=>(
-                  <th key={h} style={{ textAlign:"left", padding:"8px",
-                                       borderBottom:"1px solid #2a2a3e" }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {schedules.map(s => {
-                const m = machines.find(x => x.id === s.machine_id);
-                return (
-                  <tr key={s.id}
-                    style={{ borderBottom:"1px solid #1a1a2e" }}>
-                    <td style={{ padding:"8px", color:"#e0e0e0" }}>
-                      {m?.hostname || s.machine_id}
-                    </td>
-                    <td style={{ padding:"8px", color:"#00bcd4",
-                                 textTransform:"capitalize" }}>
-                      {s.scan_type}
-                    </td>
-                    <td style={{ padding:"8px", color:"#aaa",
-                                 textTransform:"capitalize" }}>
-                      {s.frequency}
-                    </td>
-                    <td style={{ padding:"8px", color:"#aaa" }}>
-                      {String(s.hour).padStart(2,"0")}:00
-                    </td>
-                    <td style={{ padding:"8px" }}>
-                      <button onClick={() => deleteSchedule(s.id)}
-                        style={{
-                          padding:"3px 10px", background:"#1a1a2e",
-                          color:"#f44336", border:"1px solid #f44336",
-                          borderRadius:"6px", fontSize:"11px",
-                          cursor:"pointer"
-                        }}>
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+        </SettingRow>
+      </Section>
+
+      {/* Alerts */}
+      <Section title="Alerting">
+        <SettingRow label="Email Notifications" desc="Send alerts to configured email addresses">
+          <Toggle checked={form.alert_email} onChange={v => setForm(p => ({ ...p, alert_email: v }))} />
+        </SettingRow>
+        <SettingRow label="Slack Webhook" desc="Post alerts to a Slack channel">
+          <Toggle checked={form.alert_slack} onChange={v => setForm(p => ({ ...p, alert_slack: v }))} />
+        </SettingRow>
+        <SettingRow label="CPU Alert Threshold" desc="Alert when CPU exceeds this percentage">
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <input type="range" min={50} max={99} value={form.alert_cpu_threshold}
+              onChange={e => setForm(p => ({ ...p, alert_cpu_threshold: parseInt(e.target.value) }))}
+              style={{ width: "100px", accentColor: "#38bdf8" }}
+            />
+            <span style={{ fontFamily: MONO, fontSize: "13px", color: "#38bdf8", minWidth: "40px" }}>{form.alert_cpu_threshold}%</span>
+          </div>
+        </SettingRow>
+        <SettingRow label="Disk Alert Threshold" desc="Alert when disk usage exceeds this percentage">
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <input type="range" min={70} max={99} value={form.alert_disk_threshold}
+              onChange={e => setForm(p => ({ ...p, alert_disk_threshold: parseInt(e.target.value) }))}
+              style={{ width: "100px", accentColor: "#38bdf8" }}
+            />
+            <span style={{ fontFamily: MONO, fontSize: "13px", color: "#38bdf8", minWidth: "40px" }}>{form.alert_disk_threshold}%</span>
+          </div>
+        </SettingRow>
+        <SettingRow label="Auto-Remediation" desc="Automatically run fixes when critical thresholds are exceeded">
+          <Toggle checked={form.auto_remediate} onChange={v => setForm(p => ({ ...p, auto_remediate: v }))} />
+        </SettingRow>
+      </Section>
+
+      {/* Security */}
+      <Section title="Security">
+        <SettingRow label="Require MFA" desc="Enforce two-factor authentication for all users">
+          <Toggle checked={form.mfa_required} onChange={v => setForm(p => ({ ...p, mfa_required: v }))} />
+        </SettingRow>
+        <SettingRow label="Session Timeout" desc="Automatically log out inactive sessions">
+          <select value={form.session_timeout} onChange={e => setForm(p => ({ ...p, session_timeout: e.target.value }))}
+            style={{ ...inputStyle, width: "120px" }}>
+            {["1h", "4h", "8h", "24h", "never"].map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+        </SettingRow>
+        <SettingRow label="Data Retention" desc="How long to keep audit logs and metrics">
+          <select value={form.data_retention} onChange={e => setForm(p => ({ ...p, data_retention: e.target.value }))}
+            style={{ ...inputStyle, width: "120px" }}>
+            {[["30", "30 days"], ["90", "90 days"], ["365", "1 year"], ["0", "Forever"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </SettingRow>
+      </Section>
+
+      {/* API */}
+      <Section title="API Access">
+        <SettingRow label="API Token" desc="Use this token to authenticate API requests">
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input type="password" value="jnx_live_••••••••••••••••"
+              readOnly
+              style={{ ...inputStyle, width: "200px", fontFamily: MONO, fontSize: "12px" }}
+            />
+            <button style={{
+              padding: "9px 14px", background: "rgba(56,189,248,0.06)",
+              border: "1px solid rgba(56,189,248,0.15)", borderRadius: "9px",
+              color: "#38bdf8", fontSize: "12px", cursor: "pointer", fontFamily: MONO,
+              transition: "all 0.15s",
+            }}
+              onMouseOver={e => e.currentTarget.style.background = "rgba(56,189,248,0.12)"}
+              onMouseOut={e => e.currentTarget.style.background = "rgba(56,189,248,0.06)"}
+            >Regenerate</button>
+          </div>
+        </SettingRow>
+      </Section>
+
+      {/* Danger zone */}
+      <Section title="Danger Zone">
+        <SettingRow label="Reset All Alerts" desc="Clear all active alerts from the database" danger>
+          <button style={{
+            padding: "8px 16px", background: "rgba(244,63,94,0.06)",
+            border: "1px solid rgba(244,63,94,0.2)", borderRadius: "8px",
+            color: "#f43f5e", fontSize: "12px", cursor: "pointer", fontFamily: FONT,
+            transition: "all 0.15s",
+          }}
+            onMouseOver={e => e.currentTarget.style.background = "rgba(244,63,94,0.12)"}
+            onMouseOut={e => e.currentTarget.style.background = "rgba(244,63,94,0.06)"}
+          >Reset Alerts</button>
+        </SettingRow>
+        <SettingRow label="Purge Audit Log" desc="Permanently delete all audit records" danger>
+          <button style={{
+            padding: "8px 16px", background: "rgba(244,63,94,0.06)",
+            border: "1px solid rgba(244,63,94,0.2)", borderRadius: "8px",
+            color: "#f43f5e", fontSize: "12px", cursor: "pointer", fontFamily: FONT,
+            transition: "all 0.15s",
+          }}
+            onMouseOver={e => e.currentTarget.style.background = "rgba(244,63,94,0.12)"}
+            onMouseOut={e => e.currentTarget.style.background = "rgba(244,63,94,0.06)"}
+          >Purge Logs</button>
+        </SettingRow>
+      </Section>
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;500&family=Cabinet+Grotesk:wght@400;500;600;700&display=swap');
+        select option { background: #0c1220; }
+      `}</style>
     </div>
   );
 }

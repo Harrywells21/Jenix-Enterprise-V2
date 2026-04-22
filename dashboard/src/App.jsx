@@ -25,25 +25,65 @@ function Protected({ children }) {
 
 function Layout({ children }) {
   return (
-    <div style={{ display:"flex", height:"100vh",
-                  overflow:"hidden", background:"#0d0d1a" }}>
+    <div style={{
+      display: "flex",
+      height: "100vh",
+      overflow: "hidden",
+      background: "#060812",
+      fontFamily: "'Cabinet Grotesk', sans-serif",
+    }}>
       {/* Desktop sidebar */}
-      <div style={{ display:"flex" }} className="desktop-sidebar">
+      <div className="desktop-sidebar">
         <Sidebar />
       </div>
       {/* Mobile sidebar */}
       <MobileSidebar />
-      <main style={{ flex:1, overflowY:"auto", padding:"28px" }}
-            className="main-content">
+
+      {/* Main content */}
+      <main
+        className="main-content"
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "28px 32px",
+          background: "#060812",
+          /* Subtle grid pattern */
+          backgroundImage: `
+            linear-gradient(rgba(56,189,248,0.015) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(56,189,248,0.015) 1px, transparent 1px)
+          `,
+          backgroundSize: "80px 80px",
+        }}
+      >
         <ErrorBoundary>
           {children}
         </ErrorBoundary>
       </main>
+
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600&family=Cabinet+Grotesk:wght@300;400;500;600;700;800&display=swap');
+
+        * { box-sizing: border-box; }
+
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(56,189,248,0.15); border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(56,189,248,0.3); }
+
+        ::selection { background: rgba(56,189,248,0.2); }
+
+        @keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes fadeUp  { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse   { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes spin    { to { transform: rotate(360deg); } }
+        @keyframes shimmer {
+          0%   { background-position: -200% 0; }
+          100% { background-position:  200% 0; }
+        }
+
         @media (max-width: 800px) {
           .desktop-sidebar { display: none !important; }
-          .main-content { padding: 16px !important;
-                          padding-top: 60px !important; }
+          .main-content { padding: 16px !important; padding-top: 64px !important; }
         }
       `}</style>
     </div>
@@ -56,8 +96,8 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <Routes>
-            <Route path="/welcome"    element={<Landing />} />
-            <Route path="/login"      element={<Login />} />
+            <Route path="/welcome" element={<Landing />} />
+            <Route path="/login"   element={<Login />} />
             <Route path="/" element={
               <Protected><Layout><Fleet /></Layout></Protected>
             }/>

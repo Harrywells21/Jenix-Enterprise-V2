@@ -1,345 +1,397 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import api, { getMachines } from "../api";
 
-const SEVERITY_COLOR = {
-  CRITICAL: "#f44336",
-  HIGH:     "#ff6b35",
-  MEDIUM:   "#ffb300",
-  LOW:      "#4caf50",
-  UNKNOWN:  "#666",
+const MONO = "'JetBrains Mono', monospace";
+const FONT = "'Cabinet Grotesk', sans-serif";
+const DISP = "'Syne', sans-serif";
+
+const SEV = {
+  CRITICAL: { bg: "rgba(244,63,94,0.08)",   border: "rgba(244,63,94,0.25)",   text: "#f43f5e", glow: "rgba(244,63,94,0.3)" },
+  HIGH:     { bg: "rgba(249,115,22,0.08)",   border: "rgba(249,115,22,0.25)",  text: "#f97316", glow: "rgba(249,115,22,0.3)" },
+  MEDIUM:   { bg: "rgba(245,158,11,0.08)",   border: "rgba(245,158,11,0.2)",   text: "#f59e0b", glow: "none" },
+  LOW:      { bg: "rgba(16,185,129,0.06)",   border: "rgba(16,185,129,0.15)",  text: "#10b981", glow: "none" },
+  UNKNOWN:  { bg: "rgba(122,143,166,0.06)",  border: "rgba(122,143,166,0.12)", text: "#7a8fa6", glow: "none" },
 };
 
-function SeverityBadge({ level }) {
+function SevBadge({ level }) {
+  const c = SEV[level] || SEV.UNKNOWN;
   return (
     <span style={{
-      padding:"2px 8px", borderRadius:"4px",
-      fontSize:"10px", fontWeight:700,
-      background: SEVERITY_COLOR[level] + "22",
-      color:      SEVERITY_COLOR[level],
-      border:    `1px solid ${SEVERITY_COLOR[level]}44`
-    }}>
-      {level}
-    </span>
+      padding: "2px 8px", borderRadius: "5px",
+      background: c.bg, border: `1px solid ${c.border}`,
+      color: c.text, fontSize: "9px", fontWeight: 700,
+      fontFamily: MONO, letterSpacing: "0.1em",
+    }}>{level}</span>
+  );
+}
+
+function ScanningAnimation() {
+  return (
+    <div style={{ textAlign: "center", padding: "60px 20px" }}>
+      <div style={{
+        width: "60px", height: "60px", margin: "0 auto 20px",
+        position: "relative",
+      }}>
+        <div style={{
+          position: "absolute", inset: 0, borderRadius: "50%",
+          border: "2px solid rgba(56,189,248,0.1)",
+        }}/>
+        <div style={{
+          position: "absolute", inset: 0, borderRadius: "50%",
+          border: "2px solid transparent",
+          borderTopColor: "#38bdf8",
+          animation: "spin 0.8s linear infinite",
+        }}/>
+        <div style={{
+          position: "absolute", inset: "8px", borderRadius: "50%",
+          border: "2px solid transparent",
+          borderTopColor: "rgba(56,189,248,0.4)",
+          animation: "spin 1.2s linear infinite reverse",
+        }}/>
+      </div>
+      <div style={{ fontFamily: DISP, fontSize: "16px", fontWeight: 700, color: "#38bdf8", marginBottom: "6px" }}>
+        Scanning Packages
+      </div>
+      <div style={{ fontSize: "12px", color: "rgba(122,143,166,0.5)", fontFamily: MONO }}>
+        Checking against OSV.dev vulnerability database...
+      </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
   );
 }
 
 export default function CVEScanner() {
-  const [machines,  setMachines]  = useState([]);
-  const [selected,  setSelected]  = useState("");
-  const [scanning,  setScanning]  = useState(false);
-  const [results,   setResults]   = useState(null);
-  const [summary,   setSummary]   = useState(null);
-  const [toast,     setToast]     = useState("");
-  const [polling,   setPolling]   = useState(false);
+  const [machines, setMachines] = useState([]);
+  const [selected, setSelected] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const [results,  setResults]  = useState(null);
+  const [summary,  setSummary]  = useState(null);
+  const [toast,    setToast]    = useState(null);
+  const [sevFilter, setSevFilter] = useState("ALL");
 
-  const showToast = (msg) => {
-    setToast(msg); setTimeout(() => setToast(""), 4000);
+  const showToast = (msg, type = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
   };
 
   useEffect(() => {
     getMachines().then(r => {
-      setMachines(r.data);
-      if (r.data.length > 0) setSelected(String(r.data[0].id));
-    });
-    api.get("/cve/summary").then(r => setSummary(r.data))
-       .catch(() => {});
+      setMachines(r.data || []);
+      if (r.data?.length > 0) setSelected(String(r.data[0].id));
+    }).catch(() => {});
+    api.get("/api/nodes").then(r => {
+      const nodes = r.data || [];
+      if (nodes.length > 0) {
+        api.get(`/api/nodes/${nodes[0].id}/scan/latest`)
+          .then(s => setSummary(s.data))
+          .catch(() => {});
+      }
+    }).catch(() => {});
   }, []);
 
   const startScan = async () => {
-    if (!selected) return showToast("Select a machine first");
-    setScanning(true);
-    setResults(null);
+    if (!selected) return showToast("Select a machine first", "error");
+    setScanning(true); setResults(null);
     try {
-      await api.post(`/cve/scan/${selected}`);
-      showToast("🔍 CVE scan started — checking packages...");
-      // Poll for results every 3 seconds
-      setPolling(true);
+      await api.post(`/api/nodes/${selected}/scan`);
+      showToast("CVE scan initiated — checking packages...", "success");
       const interval = setInterval(async () => {
         try {
-          const r = await api.get(`/cve/results/${selected}`);
-          if (r.data.scanned) {
-            setResults(r.data);
-            setScanning(false);
-            setPolling(false);
+          const r = await api.get(`/api/nodes/${selected}/scan/latest`);
+          if (r.data && !r.data.message) {
+            setResults(r.data); setScanning(false);
             clearInterval(interval);
-            // Refresh summary
-            const s = await api.get("/cve/summary");
-            setSummary(s.data);
+            showToast(`Scan complete — ${r.data.findings?.length || 0} CVEs found`, r.data.critical_cve > 0 ? "error" : "success");
           }
         } catch {}
       }, 3000);
-      // Timeout after 2 minutes
-      setTimeout(() => {
-        clearInterval(interval);
-        setScanning(false);
-        setPolling(false);
-      }, 120_000);
+      setTimeout(() => { clearInterval(interval); setScanning(false); }, 120_000);
     } catch (e) {
-      showToast(`❌ ${e.response?.data?.detail || e.message}`);
+      showToast(e.response?.data?.detail || e.message, "error");
       setScanning(false);
     }
   };
 
-  const riskColor = results
-    ? SEVERITY_COLOR[results.risk_level] || "#666"
-    : "#666";
+  const findings = results?.findings || [];
+  const filtered = sevFilter === "ALL" ? findings : findings.filter(f => f.severity?.toUpperCase() === sevFilter);
+
+  const sevCounts = findings.reduce((acc, f) => {
+    const s = f.severity?.toUpperCase() || "UNKNOWN";
+    acc[s] = (acc[s] || 0) + 1;
+    return acc;
+  }, {});
 
   return (
-    <div>
+    <div style={{ fontFamily: FONT, color: "#e8f0fe" }}>
       {toast && (
         <div style={{
-          position:"fixed", top:"20px", right:"20px",
-          background:"#1a1a2e", border:"1px solid #2a2a3e",
-          borderRadius:"8px", padding:"12px 20px",
-          color:"#e0e0e0", fontSize:"13px", zIndex:1000
-        }}>{toast}</div>
+          position: "fixed", top: "24px", right: "24px", zIndex: 9999,
+          padding: "12px 18px",
+          background: toast.type === "error" ? "rgba(244,63,94,0.12)" : "rgba(16,185,129,0.12)",
+          border: `1px solid ${toast.type === "error" ? "rgba(244,63,94,0.3)" : "rgba(16,185,129,0.3)"}`,
+          borderRadius: "10px", color: toast.type === "error" ? "#f43f5e" : "#10b981",
+          fontSize: "12px", fontFamily: MONO,
+        }}>{toast.type === "error" ? "✗" : "✓"} {toast.msg}</div>
       )}
 
       {/* Header */}
-      <div style={{ marginBottom:"24px" }}>
-        <h1 style={{ color:"#e0e0e0", fontSize:"22px",
-                     fontWeight:700, marginBottom:"4px" }}>
-          CVE Threat Intelligence
-        </h1>
-        <div style={{ color:"#666", fontSize:"13px" }}>
-          Scan installed packages against known vulnerabilities
-          via OSV.dev database
-        </div>
+      <div style={{ marginBottom: "24px" }}>
+        <div style={{ fontSize: "10px", color: "rgba(56,189,248,0.6)", fontFamily: MONO, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "6px" }}>Security</div>
+        <h1 style={{ fontFamily: DISP, fontSize: "26px", fontWeight: 800, letterSpacing: "-0.02em" }}>CVE Scanner</h1>
+        <p style={{ color: "rgba(122,143,166,0.6)", fontSize: "13px", marginTop: "5px" }}>
+          Real-time vulnerability detection via OSV.dev database
+        </p>
       </div>
 
-      {/* Summary cards */}
-      {summary && summary.machines_scanned > 0 && (
-        <div style={{ display:"grid",
-                      gridTemplateColumns:"repeat(3,1fr)",
-                      gap:"12px", marginBottom:"20px" }}>
-          {[
-            { label:"Machines Scanned",
-              value: summary.machines_scanned,
-              color:"#00bcd4", icon:"🔍" },
-            { label:"Critical CVEs",
-              value: summary.total_critical,
-              color: summary.total_critical > 0 ? "#f44336" : "#4caf50",
-              icon:"🚨" },
-            { label:"High CVEs",
-              value: summary.total_high,
-              color: summary.total_high > 0 ? "#ff6b35" : "#4caf50",
-              icon:"⚠️" },
-          ].map(({ label, value, color, icon }) => (
-            <div key={label} style={{
-              background:"#13131f", border:"1px solid #2a2a3e",
-              borderRadius:"10px", padding:"16px"
-            }}>
-              <div style={{ display:"flex", justifyContent:"space-between",
-                            alignItems:"center", marginBottom:"8px" }}>
-                <span style={{ color:"#666", fontSize:"11px",
-                               fontWeight:600 }}>
-                  {label}
-                </span>
-                <span>{icon}</span>
+      {/* Severity summary cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "20px" }}>
+        {["CRITICAL", "HIGH", "MEDIUM", "LOW"].map(sev => {
+          const c = SEV[sev];
+          const count = (results ? sevCounts[sev] || 0 : summary?.[`${sev.toLowerCase()}_cve`] || 0);
+          return (
+            <div key={sev} style={{
+              background: count > 0 ? c.bg : "#0c1220",
+              border: `1px solid ${count > 0 ? c.border : "rgba(255,255,255,0.06)"}`,
+              borderRadius: "12px", padding: "18px",
+              cursor: results ? "pointer" : "default",
+              transition: "all 0.2s",
+              boxShadow: count > 0 && (sev === "CRITICAL" || sev === "HIGH") ? `0 0 20px ${c.glow}` : "none",
+            }}
+              onClick={() => results && setSevFilter(sevFilter === sev ? "ALL" : sev)}
+            >
+              <div style={{ fontSize: "9px", color: count > 0 ? c.text : "rgba(122,143,166,0.4)", fontFamily: MONO, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}>
+                {sev}
               </div>
-              <div style={{ color, fontSize:"28px", fontWeight:800 }}>
-                {value}
+              <div style={{ fontFamily: DISP, fontSize: "32px", fontWeight: 800, color: count > 0 ? c.text : "rgba(61,80,104,0.5)", lineHeight: 1 }}>
+                {count}
               </div>
+              {count > 0 && sev === "CRITICAL" && (
+                <div style={{ fontSize: "10px", color: c.text, fontFamily: MONO, marginTop: "6px", opacity: 0.7 }}>Immediate action</div>
+              )}
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
 
       {/* Scanner control */}
       <div style={{
-        background:"#13131f", border:"1px solid #2a2a3e",
-        borderRadius:"12px", padding:"20px", marginBottom:"20px"
+        background: "#0c1220",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderRadius: "14px", padding: "20px",
+        marginBottom: "20px",
       }}>
-        <div style={{ color:"#aaa", fontSize:"12px",
-                      fontWeight:600, marginBottom:"12px" }}>
-          RUN CVE SCAN
+        <div style={{ fontSize: "11px", color: "rgba(122,143,166,0.5)", fontFamily: MONO, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "14px" }}>
+          Run Vulnerability Scan
         </div>
-        <div style={{ display:"flex", gap:"12px",
-                      alignItems:"center" }}>
-          <select value={selected}
-            onChange={e => setSelected(e.target.value)}
+        <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+          <select
+            value={selected} onChange={e => setSelected(e.target.value)}
             style={{
-              padding:"8px 14px", background:"#1a1a2e",
-              border:"1px solid #2a2a3e", borderRadius:"8px",
-              color:"#e0e0e0", fontSize:"13px", outline:"none"
-            }}>
+              padding: "10px 14px",
+              background: "#080d1a", border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: "9px", color: "#e8f0fe",
+              fontSize: "13px", outline: "none", fontFamily: FONT,
+              minWidth: "200px",
+            }}
+          >
+            {machines.length === 0 && <option value="">No machines connected</option>}
             {machines.map(m => (
-              <option key={m.id} value={m.id}>
-                {m.hostname} ({m.ip})
-              </option>
+              <option key={m.id} value={m.id}>{m.hostname} · {m.ip || m.ip_address || "—"}</option>
             ))}
           </select>
-          <button onClick={startScan} disabled={scanning}
+
+          <button onClick={startScan} disabled={scanning || machines.length === 0}
             style={{
-              padding:"8px 24px",
-              background: scanning ? "#1a1a2e" : "#f44336",
-              color: scanning ? "#666" : "#fff",
-              border:"none", borderRadius:"8px",
-              fontWeight:700, fontSize:"13px",
-              cursor: scanning ? "not-allowed" : "pointer"
-            }}>
-            {scanning ? "🔍 Scanning..." : "🔍 Start CVE Scan"}
+              padding: "10px 24px",
+              background: scanning ? "rgba(244,63,94,0.06)" : "linear-gradient(135deg, #f43f5e, #e11d48)",
+              color: scanning ? "rgba(244,63,94,0.4)" : "#fff",
+              border: `1px solid ${scanning ? "rgba(244,63,94,0.15)" : "transparent"}`,
+              borderRadius: "9px", fontWeight: 700, fontSize: "13px",
+              cursor: scanning ? "not-allowed" : "pointer",
+              fontFamily: FONT, letterSpacing: "0.03em",
+              boxShadow: scanning ? "none" : "0 4px 16px rgba(244,63,94,0.3)",
+              transition: "all 0.2s",
+              display: "flex", alignItems: "center", gap: "8px",
+            }}
+            onMouseOver={e => { if (!scanning) e.currentTarget.style.transform = "translateY(-1px)"; }}
+            onMouseOut={e => { e.currentTarget.style.transform = "translateY(0)"; }}
+          >
+            {scanning ? (
+              <>
+                <div style={{ width: "12px", height: "12px", border: "2px solid rgba(244,63,94,0.3)", borderTopColor: "#f43f5e", borderRadius: "50%", animation: "spin 0.7s linear infinite" }}/>
+                Scanning...
+              </>
+            ) : "🛡 Start CVE Scan"}
           </button>
-          {scanning && (
-            <div style={{ color:"#666", fontSize:"12px" }}>
-              Checking packages against OSV.dev database...
+
+          {results && (
+            <div style={{ fontSize: "12px", color: "rgba(122,143,166,0.5)", fontFamily: MONO }}>
+              Last scan: {results.scanned_at?.slice(0, 16).replace("T", " ")} UTC
             </div>
           )}
         </div>
       </div>
 
+      {/* Scanning animation */}
+      {scanning && (
+        <div style={{
+          background: "#0c1220", border: "1px solid rgba(56,189,248,0.1)",
+          borderRadius: "14px", marginBottom: "20px",
+        }}>
+          <ScanningAnimation />
+        </div>
+      )}
+
       {/* Results */}
-      {results && (
+      {results && !scanning && (
         <>
-          {/* Risk summary */}
+          {/* Risk banner */}
           <div style={{
-            background: results.risk_level === "LOW"
-              ? "#0a1a0a" : "#1a0a0a",
-            border:`1px solid ${riskColor}`,
-            borderRadius:"12px", padding:"20px",
-            marginBottom:"20px",
-            display:"flex", justifyContent:"space-between",
-            alignItems:"center"
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "16px 20px", marginBottom: "16px",
+            background: results.critical_cve > 0 ? "rgba(244,63,94,0.06)" : "rgba(16,185,129,0.06)",
+            border: `1px solid ${results.critical_cve > 0 ? "rgba(244,63,94,0.2)" : "rgba(16,185,129,0.2)"}`,
+            borderRadius: "12px",
           }}>
             <div>
-              <div style={{ color:riskColor, fontSize:"18px",
-                            fontWeight:800, marginBottom:"4px" }}>
-                Risk Level: {results.risk_level}
+              <div style={{
+                fontFamily: DISP, fontSize: "16px", fontWeight: 700,
+                color: results.critical_cve > 0 ? "#f43f5e" : "#10b981",
+                marginBottom: "3px",
+              }}>
+                {results.critical_cve > 0 ? "⚠ Critical Vulnerabilities Detected" : "✓ No Critical Vulnerabilities"}
               </div>
-              <div style={{ color:"#aaa", fontSize:"13px" }}>
-                {results.packages_scanned} packages scanned ·
-                {results.vulnerable_packages} vulnerable ·
-                {results.total_vulns} total CVEs found
-              </div>
-              <div style={{ color:"#444", fontSize:"11px",
-                            marginTop:"4px" }}>
-                Scanned: {results.scanned_at?.slice(0,16).replace("T"," ")} UTC
+              <div style={{ fontSize: "12px", color: "rgba(122,143,166,0.6)", fontFamily: MONO }}>
+                {findings.length} total CVEs found across all packages
               </div>
             </div>
-            <div style={{ textAlign:"right" }}>
-              <div style={{ display:"flex", gap:"8px",
-                            justifyContent:"flex-end" }}>
-                {[
-                  { level:"CRITICAL", count:results.critical },
-                  { level:"HIGH",     count:results.high     },
-                ].map(({ level, count }) => (
-                  <div key={level} style={{
-                    background:"#0d0d1a",
-                    border:`1px solid ${SEVERITY_COLOR[level]}44`,
-                    borderRadius:"8px", padding:"8px 16px",
-                    textAlign:"center"
-                  }}>
-                    <div style={{ color:SEVERITY_COLOR[level],
-                                  fontSize:"20px", fontWeight:800 }}>
-                      {count}
-                    </div>
-                    <div style={{ color:"#666", fontSize:"10px" }}>
-                      {level}
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              {sevFilter !== "ALL" && (
+                <button onClick={() => setSevFilter("ALL")} style={{
+                  padding: "6px 12px", background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)", borderRadius: "6px",
+                  color: "rgba(122,143,166,0.6)", fontSize: "11px", cursor: "pointer",
+                  fontFamily: MONO,
+                }}>Show All</button>
+              )}
             </div>
           </div>
 
-          {/* Vulnerable packages */}
-          {results.results.length === 0 ? (
+          {/* Severity filter tabs */}
+          {findings.length > 0 && (
+            <div style={{ display: "flex", gap: "6px", marginBottom: "14px", flexWrap: "wrap" }}>
+              {["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"].map(sev => {
+                const count = sev === "ALL" ? findings.length : (sevCounts[sev] || 0);
+                if (sev !== "ALL" && count === 0) return null;
+                const c = sev === "ALL" ? { text: "#38bdf8", border: "rgba(56,189,248,0.3)", bg: "rgba(56,189,248,0.08)" } : SEV[sev];
+                return (
+                  <button key={sev} onClick={() => setSevFilter(sev)} style={{
+                    padding: "6px 12px",
+                    background: sevFilter === sev ? c.bg : "rgba(255,255,255,0.02)",
+                    border: `1px solid ${sevFilter === sev ? c.border : "rgba(255,255,255,0.06)"}`,
+                    borderRadius: "20px", color: sevFilter === sev ? c.text : "rgba(122,143,166,0.4)",
+                    fontSize: "11px", cursor: "pointer", fontFamily: MONO,
+                    display: "flex", alignItems: "center", gap: "5px",
+                  }}>
+                    {sev} <span style={{ opacity: 0.7 }}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* CVE list */}
+          {filtered.length === 0 ? (
             <div style={{
-              background:"#0a1a0a", border:"1px solid #4caf50",
-              borderRadius:"12px", padding:"40px",
-              textAlign:"center"
+              textAlign: "center", padding: "60px",
+              background: "#0c1220", border: "1px solid rgba(16,185,129,0.15)",
+              borderRadius: "14px",
             }}>
-              <div style={{ fontSize:"40px", marginBottom:"12px" }}>
-                ✅
+              <div style={{ fontSize: "32px", marginBottom: "12px" }}>✓</div>
+              <div style={{ fontFamily: DISP, fontSize: "16px", fontWeight: 700, color: "#10b981", marginBottom: "6px" }}>
+                No {sevFilter !== "ALL" ? sevFilter + " " : ""}Vulnerabilities Found
               </div>
-              <div style={{ color:"#4caf50", fontSize:"16px",
-                            fontWeight:700 }}>
-                No vulnerabilities found
-              </div>
-              <div style={{ color:"#666", fontSize:"13px",
-                            marginTop:"4px" }}>
+              <div style={{ fontSize: "12px", color: "rgba(122,143,166,0.5)", fontFamily: MONO }}>
                 All scanned packages are clean
               </div>
             </div>
           ) : (
-            <div style={{
-              background:"#13131f", border:"1px solid #2a2a3e",
-              borderRadius:"12px", overflow:"hidden"
-            }}>
-              <div style={{ padding:"16px 20px",
-                            borderBottom:"1px solid #2a2a3e" }}>
-                <span style={{ color:"#aaa", fontSize:"12px",
-                               fontWeight:600 }}>
-                  VULNERABLE PACKAGES ({results.results.length})
-                </span>
-              </div>
-              {results.results.map((pkg, i) => (
-                <div key={i} style={{
-                  padding:"16px 20px",
-                  borderBottom: i < results.results.length-1
-                    ? "1px solid #1a1a2e" : "none"
-                }}>
-                  <div style={{ display:"flex",
-                                justifyContent:"space-between",
-                                alignItems:"center",
-                                marginBottom:"8px" }}>
-                    <div>
-                      <span style={{ color:"#e0e0e0", fontWeight:700,
-                                     fontSize:"14px" }}>
-                        {pkg.package}
-                      </span>
-                      <span style={{ color:"#666", fontSize:"12px",
-                                     marginLeft:"8px" }}>
-                        v{pkg.version}
-                      </span>
-                    </div>
-                    <div style={{ display:"flex", gap:"8px",
-                                  alignItems:"center" }}>
-                      <SeverityBadge level={pkg.highest} />
-                      <span style={{ color:"#666", fontSize:"12px" }}>
-                        {pkg.count} CVE{pkg.count>1?"s":""}
-                      </span>
-                    </div>
-                  </div>
-                  {/* CVE list */}
-                  <div style={{ display:"flex",
-                                flexDirection:"column", gap:"6px" }}>
-                    {pkg.vulns.map((v, j) => (
-                      <div key={j} style={{
-                        background:"#0d0d1a",
-                        border:"1px solid #1a1a2e",
-                        borderRadius:"6px",
-                        padding:"8px 12px",
-                        display:"flex",
-                        justifyContent:"space-between",
-                        alignItems:"center"
-                      }}>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <a href={v.url} target="_blank"
-                             rel="noreferrer"
-                             style={{ color:"#00bcd4",
-                                      fontSize:"12px",
-                                      fontWeight:600,
-                                      textDecoration:"none" }}>
-                            {v.id}
-                          </a>
-                          <span style={{ color:"#aaa",
-                                         fontSize:"11px",
-                                         marginLeft:"8px" }}>
-                            {v.summary}
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {filtered.map((f, i) => {
+                const sev = f.severity?.toUpperCase() || "UNKNOWN";
+                const c = SEV[sev] || SEV.UNKNOWN;
+                return (
+                  <div key={f.cve_id || i} style={{
+                    background: "#0c1220",
+                    border: `1px solid ${sev === "CRITICAL" || sev === "HIGH" ? c.border : "rgba(255,255,255,0.06)"}`,
+                    borderRadius: "12px", padding: "16px 18px",
+                    transition: "all 0.15s",
+                  }}
+                    onMouseOver={e => { e.currentTarget.style.borderColor = c.border; e.currentTarget.style.background = "#0e1628"; }}
+                    onMouseOut={e => { e.currentTarget.style.borderColor = (sev === "CRITICAL" || sev === "HIGH") ? c.border : "rgba(255,255,255,0.06)"; e.currentTarget.style.background = "#0c1220"; }}
+                  >
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
+                          <span style={{ fontFamily: MONO, fontSize: "13px", fontWeight: 700, color: c.text }}>
+                            {f.cve_id || "CVE-UNKNOWN"}
                           </span>
+                          <SevBadge level={sev} />
+                          {f.package && (
+                            <span style={{ fontSize: "11px", color: "rgba(122,143,166,0.5)", fontFamily: MONO }}>
+                              {f.package}
+                            </span>
+                          )}
                         </div>
-                        <SeverityBadge level={v.severity} />
+                        <div style={{ fontSize: "13px", color: "rgba(122,143,166,0.7)", lineHeight: 1.5 }}>
+                          {f.description || "No description available"}
+                        </div>
                       </div>
-                    ))}
+                      {f.cve_id && (
+                        <a
+                          href={`https://osv.dev/vulnerability/${f.cve_id}`}
+                          target="_blank" rel="noreferrer"
+                          style={{
+                            padding: "5px 12px",
+                            background: "rgba(255,255,255,0.03)",
+                            border: "1px solid rgba(255,255,255,0.07)",
+                            borderRadius: "6px", color: "rgba(56,189,248,0.6)",
+                            fontSize: "11px", textDecoration: "none",
+                            fontFamily: MONO, flexShrink: 0,
+                            transition: "all 0.15s",
+                          }}
+                          onMouseOver={e => { e.currentTarget.style.color = "#38bdf8"; e.currentTarget.style.borderColor = "rgba(56,189,248,0.25)"; }}
+                          onMouseOut={e => { e.currentTarget.style.color = "rgba(56,189,248,0.6)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)"; }}
+                        >Details →</a>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </>
       )}
+
+      {!results && !scanning && (
+        <div style={{
+          textAlign: "center", padding: "80px 20px",
+          color: "rgba(122,143,166,0.3)",
+        }}>
+          <div style={{ fontSize: "36px", marginBottom: "14px", opacity: 0.5 }}>🛡</div>
+          <div style={{ fontFamily: DISP, fontSize: "16px", fontWeight: 600, marginBottom: "6px" }}>
+            Ready to Scan
+          </div>
+          <div style={{ fontSize: "12px", fontFamily: MONO }}>
+            Select a machine and click Start CVE Scan
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;500&family=Cabinet+Grotesk:wght@400;500;600;700&display=swap');
+      `}</style>
     </div>
   );
 }

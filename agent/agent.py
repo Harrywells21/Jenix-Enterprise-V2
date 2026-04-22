@@ -66,6 +66,20 @@ async def run_agent(token: str):
                                        ping_timeout=10) as ws:
         print("[agent] Connected ✅")
 
+        # Send register message so server creates the node in DB
+        from collector import get_system_info
+        info = get_system_info()
+        await ws.send(json.dumps({
+            "type":      "register",
+            "node_name": info.get("hostname", "unknown"),
+            "os_type":   info.get("os_type", "Linux"),
+            "os_info": {
+                "hostname":  info.get("hostname", ""),
+                "os_pretty": info.get("os_pretty", info.get("os_type", "Linux")),
+            }
+        }))
+        print("[agent] Register message sent ✅")
+
         # Capture the running event loop here — in the async context
         loop = asyncio.get_running_loop()
 
