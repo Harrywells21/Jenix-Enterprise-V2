@@ -123,7 +123,21 @@ async def node_baseline(node_id: str, _: User = Depends(require_viewer)):
 @router.post("/anomaly/{node_id}/ingest")
 async def ingest_metrics(node_id: str, body: IngestReq, _: User = Depends(require_operator)):
     _d4_check()
-    return process_metrics(node_id, body.metrics)
+    metrics = body.metrics
+    # Normalize simple format {cpu:45, ram:60} to full format
+    if "cpu" not in metrics or not isinstance(metrics.get("cpu"), dict):
+        metrics = {
+            "cpu": {"cpu_percent": float(metrics.get("cpu", 0))},
+            "memory": {"ram_percent": float(metrics.get("ram", metrics.get("memory", 0))),
+                      "swap_percent": 0.0},
+            "disks": [{"percent": float(metrics.get("disk", 0)), "mountpoint": "/"}],
+            "network": [],
+            "processes": []
+        }
+    try:
+        return process_metrics(node_id, metrics)
+    except Exception as e:
+        return {"error": str(e), "node_id": node_id}
 
 @router.post("/anomaly/{node_id}/reset")
 async def reset_node_baseline(node_id: str, db: Session = Depends(get_db),
