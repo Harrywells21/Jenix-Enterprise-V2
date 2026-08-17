@@ -32,6 +32,7 @@ export default function Reports() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [fleetStats, setFleetStats] = useState(null);
   const [generating, setGenerating] = useState(false);
+  const [generatingFleet, setGeneratingFleet] = useState(false);
 
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
@@ -55,8 +56,10 @@ export default function Reports() {
     if (!selected) return showToast("Select a machine first", "error");
     setGenerating(true);
     try {
-      const r = await api.get(`/api/v2/nodes/${selected}/report/pdf`, { responseType: "blob" });
-      const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
+      const genRes = await api.post(`/api/reports/${selected}`);
+      const reportId = genRes.data.report_id;
+      const dlRes = await api.get(`/api/reports/${reportId}/download`, { responseType: "blob" });
+      const url = URL.createObjectURL(new Blob([dlRes.data], { type: "application/pdf" }));
       const a = document.createElement("a");
       a.href = url; a.download = `jenix_report_${new Date().toISOString().slice(0,10)}.pdf`;
       a.click(); URL.revokeObjectURL(url);
@@ -64,6 +67,22 @@ export default function Reports() {
     } catch (e) {
       showToast(e.response?.data?.detail || "PDF generation failed", "error");
     } finally { setGenerating(false); }
+  };
+
+  const generateFleetPDF = async () => {
+    setGeneratingFleet(true);
+    try {
+      const genRes = await api.post(`/api/reports/fleet`, { machine_ids: [] });
+      const reportId = genRes.data.report_id;
+      const dlRes = await api.get(`/api/reports/${reportId}/download`, { responseType: "blob" });
+      const url = URL.createObjectURL(new Blob([dlRes.data], { type: "application/pdf" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = `jenix_fleet_report_${new Date().toISOString().slice(0,10)}.pdf`;
+      a.click(); URL.revokeObjectURL(url);
+      showToast(`Fleet report downloaded — ${genRes.data.machines_included.length} machine(s)`, "success");
+    } catch (e) {
+      showToast(e.response?.data?.detail || "Fleet PDF generation failed", "error");
+    } finally { setGeneratingFleet(false); }
   };
 
   const online  = fleetStats?.online_nodes  || machines.filter(m => m.is_online || m.status === "online").length;
@@ -124,6 +143,22 @@ export default function Reports() {
             {generating ? (
               <><div style={{ width: "12px", height: "12px", border: "2px solid rgba(56,189,248,0.3)", borderTopColor: "#38bdf8", borderRadius: "50%", animation: "spin 0.7s linear infinite" }}/>Generating...</>
             ) : "⬇ Export PDF"}
+          </button>
+          <button onClick={generateFleetPDF} disabled={generatingFleet} style={{
+            padding: "9px 18px",
+            background: generatingFleet ? "rgba(139,92,246,0.05)" : "linear-gradient(135deg, #8b5cf6, #7c3aed)",
+            color: generatingFleet ? "rgba(139,92,246,0.3)" : "#fff",
+            border: "none", borderRadius: "9px",
+            fontWeight: 700, fontSize: "13px",
+            cursor: generatingFleet ? "not-allowed" : "pointer",
+            fontFamily: FONT, letterSpacing: "0.03em",
+            boxShadow: generatingFleet ? "none" : "0 4px 16px rgba(139,92,246,0.25)",
+            transition: "all 0.2s",
+            display: "flex", alignItems: "center", gap: "6px",
+          }}>
+            {generatingFleet ? (
+              <><div style={{ width: "12px", height: "12px", border: "2px solid rgba(139,92,246,0.3)", borderTopColor: "#8b5cf6", borderRadius: "50%", animation: "spin 0.7s linear infinite" }}/>Generating...</>
+            ) : "⬇ Fleet Report (All Machines)"}
           </button>
         </div>
       </div>

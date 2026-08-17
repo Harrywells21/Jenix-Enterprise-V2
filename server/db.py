@@ -140,13 +140,15 @@ class Schedule(Base):
 
 class Report(Base):
     __tablename__ = "reports"
-    id         = Column(Integer, primary_key=True, index=True)
-    machine_id = Column(Integer, ForeignKey("machines.id"), nullable=False)
-    filename   = Column(String, nullable=False)
-    filepath   = Column(String, nullable=False)
-    size_kb    = Column(Float, default=0.0)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    machine    = relationship("Machine", back_populates="reports")
+    id           = Column(Integer, primary_key=True, index=True)
+    machine_id   = Column(Integer, ForeignKey("machines.id"), nullable=True)  # null for fleet-wide reports
+    machine_ids  = Column(String, nullable=True)  # comma-separated machine IDs, only set for fleet-wide reports
+    report_type  = Column(String, default="single")  # "single" or "fleet"
+    filename     = Column(String, nullable=False)
+    filepath     = Column(String, nullable=False)
+    size_kb      = Column(Float, default=0.0)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    machine      = relationship("Machine", back_populates="reports")
 
 
 class Alert(Base):
@@ -192,6 +194,16 @@ def _migrate_schema():
             conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN action_passphrase_hash VARCHAR")
             conn.commit()
             print("✅ Migrated: added machines.action_passphrase_hash")
+
+        report_cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(reports)").fetchall()]
+        if "machine_ids" not in report_cols:
+            conn.exec_driver_sql("ALTER TABLE reports ADD COLUMN machine_ids VARCHAR")
+            conn.commit()
+            print("✅ Migrated: added reports.machine_ids")
+        if "report_type" not in report_cols:
+            conn.exec_driver_sql("ALTER TABLE reports ADD COLUMN report_type VARCHAR DEFAULT 'single'")
+            conn.commit()
+            print("✅ Migrated: added reports.report_type")
 
 
 def init_db():
