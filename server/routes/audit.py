@@ -2,13 +2,13 @@
 JENIX Tamper-proof Audit System
 Each log entry is hashed with SHA256 to detect tampering.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from db import get_db, AuditLog, Machine, User
 from auth import get_current_user
 from datetime import datetime
-import hashlib, json, io, csv
+import hashlib, json, io, csv, os, jwt
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -54,39 +54,6 @@ def get_audit_logs(limit: int = 200,
         })
     return result
 
-@router.get("/logs/export")
-def export_audit_csv(db: Session = Depends(get_db),
-                     _:  User    = Depends(get_current_user)):
-    logs     = db.query(AuditLog)\
-                 .order_by(AuditLog.timestamp.desc())\
-                 .limit(1000).all()
-    machines = {m.id: m.hostname for m in db.query(Machine).all()}
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow([
-        "ID", "Timestamp", "Machine", "Action",
-        "Detail", "Status", "SHA256 Hash"
-    ])
-    for l in logs:
-        writer.writerow([
-            l.id,
-            l.timestamp.isoformat(),
-            machines.get(l.machine_id, "System"),
-            l.action,
-            l.detail,
-            l.status,
-            _compute_hash(l),
-        ])
-
-    output.seek(0)
-    filename = f"jenix_audit_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
-    return StreamingResponse(
-        io.BytesIO(output.getvalue().encode()),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
-
 @router.get("/logs/verify/{log_id}")
 def verify_log(log_id: int,
                db: Session = Depends(get_db),
@@ -104,26 +71,24 @@ def verify_log(log_id: int,
     }
 
 
-# ── Token-authenticated CSV export (for browser download) ─────────────────
-from fastapi import Query as QueryParam
-import jwt as _jwt
-import os as _os
-
 @router.get("/logs/export")
-def export_audit_csv_token(
-    token: str = QueryParam(None),
+def export_audit_csv(
+    token: str = Query(None),
     db: Session = Depends(get_db)
 ):
-    """CSV export — accepts token as query param for browser downloads."""
-    # Verify token manually
+    """CSV export — accepts token as query param so the browser can trigger
+    a direct download link (a plain <a href> can't attach an Authorization
+    header)."""
     if not token:
         raise HTTPException(status_code=401, detail="Token required")
     try:
-        SECRET = _os.getenv("SECRET_KEY", "jenix_secret")
-        payload = _jwt.decode(token, SECRET, algorithms=["HS256"])
+        SECRET = os.getenv("SECRET_KEY", "jenix_secret")
+        payload = jwt.decode(token, SECRET, algorithms=["HS256"])
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token")
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
 
@@ -132,7 +97,6 @@ def export_audit_csv_token(
                  .limit(1000).all()
     machines = {m.id: m.hostname for m in db.query(Machine).all()}
 
-    import io, csv
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["ID","Timestamp","Machine","Action",

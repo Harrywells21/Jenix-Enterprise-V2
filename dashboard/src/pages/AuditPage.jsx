@@ -61,7 +61,7 @@ export default function AuditPage() {
   const handleExportCSV = () => {
     const token = getToken();
     const a = document.createElement("a");
-    a.href = `http://localhost:8000/api/audit/export?token=${token}`;
+    a.href = `http://localhost:8000/api/audit/logs/export?token=${token}`;
     a.download = `jenix_audit_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
