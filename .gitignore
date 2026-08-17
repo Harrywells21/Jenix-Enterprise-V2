@@ -46,3 +46,4 @@ server_venv/
 
 # Old DB schema archive
 *.OLD_SCHEMA_ARCHIVE*
+agent/_fleet_key_baked.py

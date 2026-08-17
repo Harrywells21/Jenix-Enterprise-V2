@@ -11,7 +11,10 @@ import base64
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidSignature
 
-FLEET_PUBLIC_KEY_B64 = "oW3oJQQI/u4hG86LWA1VmABFK0dUcKFqet69i+4Qq7A="  # baked in at install time; empty = disabled
+try:
+    from _fleet_key_baked import FLEET_PUBLIC_KEY_B64
+except ImportError:
+    FLEET_PUBLIC_KEY_B64 = ""  # no key baked in — fleet signing disabled
 
 def _load_public_key():
     if not FLEET_PUBLIC_KEY_B64:
