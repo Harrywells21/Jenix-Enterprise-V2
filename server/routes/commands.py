@@ -9,9 +9,12 @@ from datetime import datetime
 router = APIRouter(prefix="/machines", tags=["commands"])
 
 ALLOWED = {"scan", "boost", "clean", "fix", "rollback"}
+GATED   = {"boost", "clean", "fix", "rollback"}  # require node action passphrase, if one is set
 
 class CommandRequest(BaseModel):
     type: str
+    params: dict = {}
+    passphrase: str | None = None
 
 class CommandOut(BaseModel):
     id:         int
@@ -36,6 +39,15 @@ async def run_command(machine_id: int,
         raise HTTPException(status_code=404, detail="Machine not found")
     if m.status != "online":
         raise HTTPException(status_code=400, detail="Machine is offline")
+    if body.type in GATED and m.action_passphrase_hash:
+        from db import verify_passphrase
+        if not body.passphrase or not verify_passphrase(body.passphrase, m.action_passphrase_hash):
+            log = AuditLog(machine_id=machine_id, user_id=current_user.id,
+                           action=f"{body.type}_denied",
+                           detail=f"Passphrase check failed for '{body.type}' by {current_user.name}",
+                           status="critical")
+            db.add(log); db.commit()
+            raise HTTPException(status_code=403, detail="Invalid or missing node passphrase")
     cmd = Command(machine_id=machine_id, user_id=current_user.id,
                   type=body.type, status="pending")
     db.add(cmd); db.commit(); db.refresh(cmd)
@@ -45,7 +57,12 @@ async def run_command(machine_id: int,
                    status="ok")
     db.add(log); db.commit()
     # Send via WebSocket to agent
-    sent = await send_command(m.token, {"cmd": body.type, "cmd_id": cmd.id})
+    sent = await send_command(m.token, {
+        "type":       "command",
+        "command":    body.type,
+        "command_id": cmd.id,
+        "params":     body.params,
+    })
     if not sent:
         cmd.status = "failed"
         cmd.output = "Agent not connected via WebSocket"

@@ -12,14 +12,6 @@ RECONNECT_DELAY  = 5
 
 _stop = False
 
-def _handle_signal(sig, frame):
-    global _stop
-    _stop = True
-    sys.exit(0)
-
-signal.signal(signal.SIGTERM, _handle_signal)
-signal.signal(signal.SIGINT,  _handle_signal)
-
 def register_with_server() -> tuple[str, int]:
     import urllib.request
     from collector import get_system_info
@@ -33,7 +25,7 @@ def register_with_server() -> tuple[str, int]:
     info    = get_system_info()
     payload = json.dumps(info).encode()
     req     = urllib.request.Request(
-        f"{SERVER_URL}/machines/register",
+        f"{SERVER_URL}/api/machines/register",
         data=payload,
         headers={"Content-Type": "application/json"},
         method="POST"
@@ -106,11 +98,16 @@ async def run_agent(token: str):
             async for raw in ws:
                 try:
                     data     = json.loads(raw)
-                    cmd_type = data.get("cmd")
-                    cmd_id   = data.get("cmd_id")
+                    cmd_type = data.get("command") or data.get("cmd")
+                    cmd_id   = data.get("command_id") or data.get("cmd_id")
+                    params   = data.get("params") or {}
+                    if "script" in data:
+                        params["script"] = data["script"]
+                    if "signature" in data:
+                        params["signature"] = data["signature"]
                     if cmd_type and cmd_id:
                         print(f"[agent] Received command: {cmd_type} (id={cmd_id})")
-                        execute_command(cmd_type, cmd_id, _sync_send)
+                        execute_command(cmd_type, cmd_id, _sync_send, params)
                     elif data.get("type") == "pong":
                         pass
                 except Exception as e:
@@ -134,6 +131,29 @@ async def main():
             print(f"[agent] Disconnected: {e} — reconnecting in {RECONNECT_DELAY}s")
         await asyncio.sleep(RECONNECT_DELAY)
 
+async def _run_with_signal_handling():
+    loop = asyncio.get_running_loop()
+    main_task = asyncio.ensure_future(main())
+
+    _shutdown_requested = False
+    def _request_shutdown():
+        global _stop
+        nonlocal _shutdown_requested
+        if _shutdown_requested:
+            return
+        _shutdown_requested = True
+        _stop = True
+        print("[agent] Shutdown signal received — cancelling tasks")
+        main_task.cancel()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, _request_shutdown)
+
+    try:
+        await main_task
+    except asyncio.CancelledError:
+        print("[agent] Shutdown complete — exiting cleanly")
+
 if __name__ == "__main__":
     sys.path.insert(0, os.path.dirname(__file__))
-    asyncio.run(main())
+    asyncio.run(_run_with_signal_handling())

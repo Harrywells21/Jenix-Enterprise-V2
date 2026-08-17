@@ -194,10 +194,10 @@ export default function Landing() {
         </div>
         <div style={{ display: "flex", gap: "32px" }}>
           {["Features", "Pricing", "Docs", "Blog"].map(item => (
-            <a key={item} href="#" style={{ color: "rgba(122,143,166,0.6)", fontSize: "13px", textDecoration: "none", transition: "color 0.2s", fontWeight: 500 }}
+            <button type="button" key={item} style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer",  color: "rgba(122,143,166,0.6)", fontSize: "13px", textDecoration: "none", transition: "color 0.2s", fontWeight: 500 }}
               onMouseOver={e => e.target.style.color = "#e8f0fe"}
               onMouseOut={e => e.target.style.color = "rgba(122,143,166,0.6)"}
-            >{item}</a>
+            >{item}</button>
           ))}
         </div>
         <div style={{ display: "flex", gap: "10px" }}>
@@ -553,10 +553,10 @@ export default function Landing() {
         </div>
         <div style={{ display: "flex", gap: "20px" }}>
           {["Privacy", "Terms", "Security", "Status"].map(item => (
-            <a key={item} href="#" style={{ fontSize: "12px", color: "rgba(61,80,104,0.6)", textDecoration: "none", fontFamily: MONO, transition: "color 0.2s" }}
+            <button type="button" key={item} style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer",  fontSize: "12px", color: "rgba(61,80,104,0.6)", textDecoration: "none", fontFamily: MONO, transition: "color 0.2s" }}
               onMouseOver={e => e.target.style.color = "#38bdf8"}
               onMouseOut={e => e.target.style.color = "rgba(61,80,104,0.6)"}
-            >{item}</a>
+            >{item}</button>
           ))}
         </div>
       </footer>

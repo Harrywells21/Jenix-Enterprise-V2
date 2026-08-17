@@ -16,8 +16,31 @@ engine = create_engine(
     connect_args={"check_same_thread": False}
 )
 
+from sqlalchemy import event
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    if engine.dialect.name == "sqlite":
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
+
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
+
+# ── Passphrase hashing (shared by node action-passphrase feature) ──────────
+from passlib.context import CryptContext
+_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_passphrase(raw: str) -> str:
+    return _pwd_ctx.hash(raw)
+
+def verify_passphrase(raw: str, hashed: str) -> bool:
+    try:
+        return _pwd_ctx.verify(raw, hashed)
+    except Exception:
+        return False
 
 # ── Models ─────────────────────────────────────────────────────────────────
 
@@ -42,6 +65,7 @@ class Machine(Base):
     kernel      = Column(String, default="")
     token       = Column(String, unique=True, index=True, nullable=False)
     status      = Column(String, default="offline")   # online / offline / warning
+    action_passphrase_hash = Column(String, nullable=True)  # gates boost/clean/fix/rollback
     last_seen   = Column(DateTime, default=datetime.utcnow)
     created_at  = Column(DateTime, default=datetime.utcnow)
     metrics     = relationship("Metric",   back_populates="machine", cascade="all, delete")
@@ -67,15 +91,25 @@ class Metric(Base):
 
 class Command(Base):
     __tablename__ = "commands"
-    id         = Column(Integer, primary_key=True, index=True)
+    id          = Column(Integer, primary_key=True, index=True)
+    machine_id  = Column(Integer, ForeignKey("machines.id"), nullable=False)
+    user_id     = Column(Integer, nullable=True)
+    type        = Column(String, nullable=False)   # scan / boost / clean / fix / rollback
+    status      = Column(String, default="pending") # pending / running / done / failed
+    output      = Column(Text, default="")
+    snapshot_id = Column(String, nullable=True)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+    updated_at  = Column(DateTime, default=datetime.utcnow)
+    machine     = relationship("Machine", back_populates="commands")
+
+
+class Snapshot(Base):
+    __tablename__ = "snapshots"
+    id         = Column(String, primary_key=True)
     machine_id = Column(Integer, ForeignKey("machines.id"), nullable=False)
-    user_id    = Column(Integer, nullable=True)
-    type       = Column(String, nullable=False)   # scan / boost / clean / fix / rollback
-    status     = Column(String, default="pending") # pending / running / done / failed
-    output     = Column(Text, default="")
+    reason     = Column(String, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
-    machine    = relationship("Machine", back_populates="commands")
+    machine    = relationship("Machine")
 
 
 class AuditLog(Base):
@@ -148,8 +182,21 @@ def get_db():
         db.close()
 
 
+def _migrate_schema():
+    """Additive column migration for existing installs (create_all only handles new tables)."""
+    if engine.dialect.name != "sqlite":
+        return
+    with engine.connect() as conn:
+        cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(machines)").fetchall()]
+        if "action_passphrase_hash" not in cols:
+            conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN action_passphrase_hash VARCHAR")
+            conn.commit()
+            print("✅ Migrated: added machines.action_passphrase_hash")
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate_schema()
     _seed_admin()
 
 

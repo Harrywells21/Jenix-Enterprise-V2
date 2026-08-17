@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid, AreaChart, Area
+  YAxis, Tooltip,
+  ResponsiveContainer, AreaChart, Area
 } from "recharts";
-import { getMachine, sendCommand, getLogs, connectDashboardWS } from "../api";
+import { getMachine, sendCommand, getLogs, connectDashboardWS, getMachineScore, getSnapshots, setNodePassphrase, clearNodePassphrase, getPassphraseStatus } from "../api";
 
 const FONT = "'Cabinet Grotesk', sans-serif";
 const MONO = "'JetBrains Mono', monospace";
@@ -96,14 +96,23 @@ export default function Machine() {
   const { id }   = useParams();
   const navigate = useNavigate();
 
-  const [machine,   setMachine]   = useState(null);
-  const [graphData, setGraphData] = useState([]);
-  const [logs,      setLogs]      = useState([]);
-  const [terminal,  setTerminal]  = useState("");
-  const [cmdStatus, setCmdStatus] = useState("idle");
-  const [loading,   setLoading]   = useState(true);
-  const [activeTab, setActiveTab] = useState("metrics");
-  const [toast,     setToast]     = useState(null);
+  const [machine,    setMachine]    = useState(null);
+  const [graphData,  setGraphData]  = useState([]);
+  const [logs,       setLogs]       = useState([]);
+  const [terminal,   setTerminal]   = useState("");
+  const [cmdStatus,  setCmdStatus]  = useState("idle");
+  const [loading,    setLoading]    = useState(true);
+  const [activeTab,  setActiveTab]  = useState("metrics");
+  const [toast,      setToast]      = useState(null);
+  const [healthData, setHealthData] = useState(null);
+  const [snapshots,  setSnapshots]  = useState([]);
+  const [restoringId,setRestoringId]= useState(null);
+  const [passphraseSet, setPassphraseSet] = useState(false);
+  const [pendingAction, setPendingAction] = useState(null); // { cmd, params, label }
+  const [modalPassphrase, setModalPassphrase] = useState("");
+  const [modalError, setModalError] = useState("");
+  const [showSetPassModal, setShowSetPassModal] = useState(false);
+  const [newPassphrase, setNewPassphrase] = useState("");
 
   const termRef = useRef(null);
   const wsRef   = useRef(null);
@@ -115,8 +124,14 @@ export default function Machine() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([getMachine(id), getLogs(id)])
-      .then(([mRes, logRes]) => {
+    Promise.all([
+      getMachine(id),
+      getLogs(id),
+      getMachineScore(id).catch(() => ({ data: null })),
+      getSnapshots(id).catch(() => ({ data: [] })),
+      getPassphraseStatus(id).catch(() => ({ data: { is_set: false } })),
+    ])
+      .then(([mRes, logRes, scoreRes, snapRes, passRes]) => {
         const m = mRes.data;
         setMachine(m);
         setGraphData(Array(30).fill(null).map((_, i) => ({
@@ -127,6 +142,9 @@ export default function Machine() {
           net:  0,
         })));
         setLogs(Array.isArray(logRes.data) ? logRes.data : []);
+        setHealthData(scoreRes.data);
+        setSnapshots(Array.isArray(snapRes.data) ? snapRes.data : []);
+        setPassphraseSet(!!passRes.data?.is_set);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -144,7 +162,11 @@ export default function Machine() {
       }
       if (msg.type === "cmd_output") {
         setTerminal(prev => prev + msg.output);
-        if (msg.status === "done" || msg.status === "failed") setCmdStatus(msg.status);
+        if (msg.status === "done" || msg.status === "failed") {
+          setCmdStatus(msg.status);
+          setRestoringId(null);
+          getSnapshots(id).then(r => setSnapshots(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+        }
         setTimeout(() => { if (termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight; }, 50);
       }
     });
@@ -152,17 +174,62 @@ export default function Machine() {
     return () => wsRef.current?.close();
   }, [id]);
 
-  const handleCommand = async (cmd) => {
+  const GATED_COMMANDS = ["boost", "clean", "fix", "rollback"];
+
+  const handleCommand = async (cmd, params = {}) => {
     if (cmdStatus === "running") return;
-    if (["fix", "rollback"].includes(cmd) && !window.confirm(`Run ${cmd.toUpperCase()} on ${machine?.hostname}?`)) return;
+    const label = params.snapshot_id ? `ROLLBACK (restore point ${params.snapshot_id.slice(0, 8)})` : cmd.toUpperCase();
+    if (GATED_COMMANDS.includes(cmd) && passphraseSet) {
+      setModalError("");
+      setModalPassphrase("");
+      setPendingAction({ cmd, params, label });
+      return;
+    }
+    await dispatchCommand(cmd, params, label, null);
+  };
+
+  const dispatchCommand = async (cmd, params, label, passphrase) => {
     try {
       setCmdStatus("running");
+      if (params.snapshot_id) setRestoringId(params.snapshot_id);
       setTerminal(`> Executing ${cmd} on ${machine?.hostname}...\n`);
-      await sendCommand(id, cmd);
+      await sendCommand(id, cmd, params, passphrase);
       showToast(`${cmd} command dispatched`, "success");
     } catch (e) {
       setTerminal(`Error: ${e.response?.data?.detail || e.message}\n`);
       setCmdStatus("failed");
+      setRestoringId(null);
+      showToast(e.response?.data?.detail || e.message, "error");
+    }
+  };
+
+  const confirmPendingAction = async () => {
+    if (!modalPassphrase) { setModalError("Enter the node passphrase"); return; }
+    const { cmd, params, label } = pendingAction;
+    setPendingAction(null);
+    await dispatchCommand(cmd, params, label, modalPassphrase);
+  };
+
+  const handleSetPassphrase = async () => {
+    if (newPassphrase.length < 8) { showToast("Passphrase must be at least 8 characters", "error"); return; }
+    try {
+      await setNodePassphrase(id, newPassphrase);
+      setPassphraseSet(true);
+      setShowSetPassModal(false);
+      setNewPassphrase("");
+      showToast("Node passphrase set", "success");
+    } catch (e) {
+      showToast(e.response?.data?.detail || e.message, "error");
+    }
+  };
+
+  const handleClearPassphrase = async () => {
+    if (!window.confirm(`Remove the action passphrase for ${machine?.hostname}? Boost/Clean/Auto-Fix/Rollback will no longer require it.`)) return;
+    try {
+      await clearNodePassphrase(id);
+      setPassphraseSet(false);
+      showToast("Node passphrase removed", "success");
+    } catch (e) {
       showToast(e.response?.data?.detail || e.message, "error");
     }
   };
@@ -181,9 +248,9 @@ export default function Machine() {
     <div style={{ fontFamily: FONT, color: "#f43f5e", padding: "40px 0" }}>Machine not found</div>
   );
 
-  const health = machine.health_score || 0;
-  const healthColor = health > 70 ? "#10b981" : health > 40 ? "#f59e0b" : "#f43f5e";
-  const online = machine.is_online;
+  const health = healthData?.score ?? 0;
+  const healthColor = healthData?.color || (health > 70 ? "#10b981" : health > 40 ? "#f59e0b" : "#f43f5e");
+  const online = (machine.status === "online");
 
   const cmds = [
     { id: "scan",     label: "CVE Scan",   accent: "#38bdf8" },
@@ -236,7 +303,7 @@ export default function Machine() {
               {machine.hostname}
             </h1>
             <div style={{ fontSize: "12px", color: "rgba(122,143,166,0.6)", fontFamily: MONO, marginTop: "2px" }}>
-              {machine.os_pretty || machine.os_type} · {machine.ip_address || "IP not set"}
+              {machine.os_name} · {machine.ip || "IP not set"}
             </div>
           </div>
         </div>
@@ -328,6 +395,15 @@ export default function Machine() {
               <div style={{ fontSize: "11px", color: "rgba(122,143,166,0.5)", fontFamily: MONO, letterSpacing: "0.16em", textTransform: "uppercase" }}>
                 Remote Execution
               </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <button onClick={() => passphraseSet ? handleClearPassphrase() : setShowSetPassModal(true)} style={{
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: "10px", fontFamily: MONO, letterSpacing: "0.06em",
+                color: passphraseSet ? "#10b981" : "rgba(122,143,166,0.4)",
+                display: "flex", alignItems: "center", gap: "5px", padding: "0",
+              }}>
+                {passphraseSet ? "PASSPHRASE SET (click to remove)" : "Set node passphrase"}
+              </button>
               <div style={{
                 fontSize: "10px", fontFamily: MONO, letterSpacing: "0.08em",
                 color: cmdStatus === "running" ? "#f59e0b" : cmdStatus === "done" ? "#10b981" : cmdStatus === "failed" ? "#f43f5e" : "rgba(122,143,166,0.3)",
@@ -339,6 +415,7 @@ export default function Machine() {
                     {cmdStatus.toUpperCase()}
                   </>
                 )}
+              </div>
               </div>
             </div>
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
@@ -370,6 +447,58 @@ export default function Machine() {
             </div>
           </div>
 
+          {/* Restore Points */}
+          <div style={{
+            background: "#0c1220",
+            border: "1px solid rgba(255,255,255,0.06)",
+            borderRadius: "12px", padding: "16px",
+            marginBottom: "14px",
+          }}>
+            <div style={{ fontSize: "11px", color: "rgba(122,143,166,0.5)", fontFamily: MONO, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "12px" }}>
+              Restore Points
+            </div>
+            {snapshots.length === 0 ? (
+              <div style={{ color: "rgba(122,143,166,0.3)", fontFamily: MONO, fontSize: "12px" }}>
+                No restore points yet — one is created automatically before Boost, Clean, or Auto-Fix.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {snapshots.map(s => (
+                  <div key={s.id} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "10px 12px",
+                    background: "rgba(255,255,255,0.02)",
+                    border: "1px solid rgba(255,255,255,0.05)",
+                    borderRadius: "8px",
+                  }}>
+                    <div>
+                      <div style={{ fontFamily: MONO, fontSize: "12px", color: "#e8f0fe" }}>{s.reason || s.id}</div>
+                      <div style={{ fontFamily: MONO, fontSize: "10px", color: "rgba(122,143,166,0.5)", marginTop: "2px" }}>
+                        {s.id.slice(0, 8)} · {new Date(s.created_at).toLocaleString()}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleCommand("rollback", { snapshot_id: s.id })}
+                      disabled={cmdStatus === "running"}
+                      style={{
+                        padding: "6px 14px",
+                        background: "rgba(244,63,94,0.08)",
+                        border: "1px solid rgba(244,63,94,0.25)",
+                        borderRadius: "7px",
+                        color: cmdStatus === "running" ? "rgba(122,143,166,0.3)" : "#f43f5e",
+                        fontSize: "11px", fontWeight: 600,
+                        cursor: cmdStatus === "running" ? "not-allowed" : "pointer",
+                        fontFamily: FONT,
+                      }}
+                    >
+                      {restoringId === s.id ? "Restoring..." : "Restore"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Terminal output */}
           <div ref={termRef} style={{
             background: "#040810",
@@ -389,6 +518,100 @@ export default function Machine() {
                 ▊ Ready. Select a command above to execute remotely.
               </span>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Passphrase confirm modal (gated commands) */}
+      {pendingAction && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000,
+        }} onClick={() => setPendingAction(null)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: "#0c1220", border: "1px solid rgba(244,63,94,0.3)",
+            borderRadius: "14px", padding: "24px", width: "360px",
+            fontFamily: FONT,
+          }}>
+            <div style={{ fontSize: "13px", fontWeight: 700, color: "#e8f0fe", marginBottom: "8px" }}>
+              Confirm: {pendingAction.label}
+            </div>
+            <div style={{ fontSize: "12px", color: "rgba(122,143,166,0.6)", marginBottom: "14px" }}>
+              This node requires its action passphrase to run {pendingAction.cmd}.
+            </div>
+            <input
+              type="password"
+              autoFocus
+              value={modalPassphrase}
+              onChange={e => { setModalPassphrase(e.target.value); setModalError(""); }}
+              onKeyDown={e => e.key === "Enter" && confirmPendingAction()}
+              placeholder="Node passphrase"
+              style={{
+                width: "100%", padding: "10px 12px", boxSizing: "border-box",
+                background: "#040810", border: `1px solid ${modalError ? "#f43f5e" : "rgba(255,255,255,0.1)"}`,
+                borderRadius: "8px", color: "#e8f0fe", fontFamily: MONO, fontSize: "13px",
+                marginBottom: "6px",
+              }}
+            />
+            {modalError && <div style={{ fontSize: "11px", color: "#f43f5e", marginBottom: "10px" }}>{modalError}</div>}
+            <div style={{ display: "flex", gap: "8px", marginTop: "14px" }}>
+              <button onClick={() => setPendingAction(null)} style={{
+                flex: 1, padding: "9px", background: "transparent",
+                border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px",
+                color: "rgba(122,143,166,0.7)", fontSize: "12px", cursor: "pointer", fontFamily: FONT,
+              }}>Cancel</button>
+              <button onClick={confirmPendingAction} style={{
+                flex: 1, padding: "9px", background: "rgba(244,63,94,0.12)",
+                border: "1px solid rgba(244,63,94,0.4)", borderRadius: "8px",
+                color: "#f43f5e", fontSize: "12px", fontWeight: 600, cursor: "pointer", fontFamily: FONT,
+              }}>Confirm</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Set node passphrase modal */}
+      {showSetPassModal && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000,
+        }} onClick={() => setShowSetPassModal(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: "#0c1220", border: "1px solid rgba(56,189,248,0.3)",
+            borderRadius: "14px", padding: "24px", width: "360px",
+            fontFamily: FONT,
+          }}>
+            <div style={{ fontSize: "13px", fontWeight: 700, color: "#e8f0fe", marginBottom: "8px" }}>
+              Set Node Action Passphrase
+            </div>
+            <div style={{ fontSize: "12px", color: "rgba(122,143,166,0.6)", marginBottom: "14px" }}>
+              Required going forward to run Boost, Clean, Auto-Fix, or Rollback on {machine?.hostname}. Minimum 8 characters.
+            </div>
+            <input
+              type="password"
+              autoFocus
+              value={newPassphrase}
+              onChange={e => setNewPassphrase(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleSetPassphrase()}
+              placeholder="New passphrase"
+              style={{
+                width: "100%", padding: "10px 12px", boxSizing: "border-box",
+                background: "#040810", border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: "8px", color: "#e8f0fe", fontFamily: MONO, fontSize: "13px",
+              }}
+            />
+            <div style={{ display: "flex", gap: "8px", marginTop: "14px" }}>
+              <button onClick={() => setShowSetPassModal(false)} style={{
+                flex: 1, padding: "9px", background: "transparent",
+                border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px",
+                color: "rgba(122,143,166,0.7)", fontSize: "12px", cursor: "pointer", fontFamily: FONT,
+              }}>Cancel</button>
+              <button onClick={handleSetPassphrase} style={{
+                flex: 1, padding: "9px", background: "rgba(56,189,248,0.12)",
+                border: "1px solid rgba(56,189,248,0.4)", borderRadius: "8px",
+                color: "#38bdf8", fontSize: "12px", fontWeight: 600, cursor: "pointer", fontFamily: FONT,
+              }}>Set Passphrase</button>
+            </div>
           </div>
         </div>
       )}

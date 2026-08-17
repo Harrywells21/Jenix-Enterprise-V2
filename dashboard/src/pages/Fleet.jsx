@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { getFleetOverview, getAllAlerts, markAllRead, fleetCommand, getSavings } from "../api";
 
@@ -71,7 +71,7 @@ function StatCard({ label, value, sub, accent, icon, delay = 0 }) {
 
 /* ── Alert Item ── */
 function AlertItem({ alert, onDismiss }) {
-  const sev = alert.severity || "info";
+  const sev = alert.level || "info";
   const colors = {
     critical: { bg: "rgba(244,63,94,0.08)", border: "rgba(244,63,94,0.25)", text: "#f43f5e", dot: "#f43f5e" },
     warning:  { bg: "rgba(245,158,11,0.08)", border: "rgba(245,158,11,0.2)",  text: "#f59e0b", dot: "#f59e0b" },
@@ -180,12 +180,17 @@ export default function Fleet() {
     return () => clearInterval(iv);
   }, []);
 
+  const COMMAND_LABELS = {
+    scan: "Fleet CVE Scan", boost: "Boost", clean: "Clean",
+    report: "Health Report", restart: "Service Restart", logs: "Log Collection",
+  };
+
   const handleCommand = async (type) => {
     try {
       const r = await fleetCommand(type, []);
       const line = `[${new Date().toLocaleTimeString()}] ${type.toUpperCase()} dispatched → ${r.data?.dispatched || 0} nodes`;
       setCmdOutput(p => [line, ...p.slice(0, 19)]);
-      showToast(`${type} command sent to all online nodes`, "success");
+      showToast(`${COMMAND_LABELS[type] || type} sent to all online nodes`, "success");
     } catch (e) {
       showToast(e.response?.data?.detail || e.message, "error");
     }
@@ -194,8 +199,8 @@ export default function Fleet() {
   const stats = [
     {
       label: "Total Machines",
-      value: overview?.total_machines ?? "—",
-      sub: `${overview?.online_machines ?? 0} online · ${(overview?.total_machines ?? 0) - (overview?.online_machines ?? 0)} offline`,
+      value: overview?.total ?? "—",
+      sub: `${overview?.online ?? 0} online · ${(overview?.total ?? 0) - (overview?.online ?? 0)} offline`,
       accent: "#38bdf8", icon: "⬡", delay: 0,
     },
     {
@@ -214,9 +219,9 @@ export default function Fleet() {
     },
     {
       label: "Critical Alerts",
-      value: alerts.filter(a => a.severity === "critical").length || "—",
-      sub: `${alerts.length} total · ${alerts.filter(a => a.severity === "warning").length} warnings`,
-      accent: alerts.filter(a => a.severity === "critical").length > 0 ? "#f43f5e" : "#10b981",
+      value: alerts.filter(a => a.level === "critical").length || "—",
+      sub: `${alerts.length} total · ${alerts.filter(a => a.level === "warning").length} warnings`,
+      accent: alerts.filter(a => a.level === "critical").length > 0 ? "#f43f5e" : "#10b981",
       icon: "⚠", delay: 240,
     },
     {
@@ -227,17 +232,15 @@ export default function Fleet() {
     },
     {
       label: "Annual Savings",
-      value: savings?.estimated_savings
-        ? `$${(savings.estimated_savings / 1000).toFixed(0)}k`
-        : overview?.estimated_savings
-          ? `$${Math.round(overview.estimated_savings).toLocaleString()}`
-          : "—",
+      value: savings?.annual_savings
+        ? `$${Math.round(savings.annual_savings).toLocaleString()}`
+        : "—",
       sub: "~$45/hr in manual labor",
       accent: "#10b981", icon: "◈", delay: 400,
     },
   ];
 
-  const critical = alerts.filter(a => a.severity === "critical");
+  const critical = alerts.filter(a => a.level === "critical");
 
   return (
     <div style={{
@@ -303,7 +306,7 @@ export default function Fleet() {
             }}
             onMouseOver={e => { e.currentTarget.style.background = "rgba(56,189,248,0.15)"; }}
             onMouseOut={e => { e.currentTarget.style.background = "rgba(56,189,248,0.08)"; }}
-          >⚡ Scan ALL</button>
+          >⚡ Fleet Scan ALL</button>
           <button
             onClick={() => handleCommand("boost")}
             style={{
@@ -486,7 +489,7 @@ export default function Fleet() {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
             {[
-              { icon: "🛡", label: "CVE Scan",    desc: "Full vulnerability audit",   type: "scan",    accent: "#38bdf8" },
+              { icon: "🛡", label: "Fleet CVE Scan", desc: "Bulk scan — all online nodes", type: "scan",    accent: "#38bdf8" },
               { icon: "⚡", label: "Boost",       desc: "Optimize performance",       type: "boost",   accent: "#10b981" },
               { icon: "🧹", label: "Clean",       desc: "Remove junk & temp files",   type: "clean",   accent: "#f59e0b" },
               { icon: "📊", label: "Health",      desc: "System health report",       type: "report",  accent: "#8b5cf6" },
@@ -512,7 +515,7 @@ export default function Fleet() {
         {[
           { label: "Fleet Disk",   value: overview?.avg_disk ? `${overview.avg_disk.toFixed(1)}%` : "—", accent: "#8b5cf6" },
           { label: "Hours Saved",  value: overview?.hours_saved ? `${overview.hours_saved}h` : "—",      accent: "#10b981" },
-          { label: "Online",       value: `${overview?.online_machines ?? 0}/${overview?.total_machines ?? 0}`, accent: "#38bdf8" },
+          { label: "Online",       value: `${overview?.online ?? 0}/${overview?.total ?? 0}`, accent: "#38bdf8" },
           { label: "Uptime",       value: overview?.fleet_uptime || "99.9%", accent: "#10b981" },
         ].map(({ label, value, accent }) => (
           <div key={label} style={{ display: "flex", alignItems: "center", gap: "12px" }}>

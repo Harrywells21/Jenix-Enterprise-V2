@@ -97,7 +97,7 @@ for router in [
     audit_router, cve_router, notify_router,
     whitelabel_router, uptime_router, backup_router,
 ]:
-    app.include_router(router)
+    app.include_router(router, prefix="/api")
 
 @app.websocket("/ws/agent/{token}")
 async def ws_agent(websocket: WebSocket, token: str):
@@ -109,12 +109,20 @@ async def ws_dashboard(websocket: WebSocket):
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(static_dir, exist_ok=True)
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 @app.get("/install")
 def installer():
     from fastapi.responses import RedirectResponse
     return RedirectResponse("/static/install.sh")
+
+@app.get("/dashboard", include_in_schema=False)
+@app.get("/dashboard/{full_path:path}", include_in_schema=False)
+def serve_dashboard(full_path: str = ""):
+    from fastapi.responses import FileResponse
+    index_path = os.path.join(static_dir, "index.html")
+    return FileResponse(index_path)
+
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 @app.get("/health", tags=["System"])
 def health():
@@ -188,7 +196,7 @@ def root():
     from a single browser tab.
   </p>
   <div class="btns">
-    <a href="http://localhost:3000" class="btn-primary">
+    <a href="/dashboard" class="btn-primary">
       Open Dashboard →
     </a>
     <a href="/docs" class="btn-secondary">

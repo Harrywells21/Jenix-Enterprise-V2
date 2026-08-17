@@ -1,0 +1,6 @@
+server/.env
+server/jenix.db
+server/jenix.db.*
+server/__pycache__
+**/__pycache__
+*.pyc

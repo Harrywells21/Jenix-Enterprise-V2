@@ -28,7 +28,6 @@ function ROICard({ label, value, sub, accent, icon }) {
 export default function Reports() {
   const [machines,  setMachines]  = useState([]);
   const [selected,  setSelected]  = useState("");
-  const [loading,   setLoading]   = useState(false);
   const [toast,     setToast]     = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
   const [fleetStats, setFleetStats] = useState(null);
@@ -74,7 +73,6 @@ export default function Reports() {
   const cmdToday = fleetStats?.commands_today || auditLogs.filter(l => l.timestamp?.startsWith(new Date().toISOString().slice(0,10))).length;
 
   const recentLogs = auditLogs.slice(0, 8);
-  const commandLogs = auditLogs.filter(l => l.action?.toLowerCase().includes("command")).slice(0, 5);
 
   return (
     <div style={{ fontFamily: FONT, color: "#e8f0fe" }}>

@@ -207,7 +207,6 @@ export default function Overview() {
   const [search,      setSearch]      = useState("");
   const [filter,      setFilter]      = useState("all");
   const [toast,       setToast]       = useState("");
-  const [view,        setView]        = useState("grid");
   const wsRef = useRef(null);
 
   useEffect(() => {

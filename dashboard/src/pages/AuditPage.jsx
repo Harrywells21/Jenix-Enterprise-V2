@@ -71,10 +71,11 @@ export default function AuditPage() {
     const matchSearch = !s ||
       l.action?.toLowerCase().includes(s) ||
       l.detail?.toLowerCase().includes(s) ||
+      l.hostname?.toLowerCase().includes(s) ||
       l.username?.toLowerCase().includes(s);
     const matchFilter = filter === "all" ? true :
-      filter === "critical" ? l.severity === "critical" :
-      filter === "warning"  ? l.severity === "warning"  : true;
+      filter === "critical" ? l.status === "critical" :
+      filter === "warning"  ? l.status === "warning"  : true;
     return matchSearch && matchFilter;
   });
 
@@ -90,7 +91,7 @@ export default function AuditPage() {
     total:    logs.length,
     today:    logs.filter(l => l.timestamp?.startsWith(new Date().toISOString().slice(0, 10))).length,
     verified: Object.values(verified).filter(v => v.valid).length,
-    critical: logs.filter(l => l.severity === "critical").length,
+    critical: logs.filter(l => l.status === "critical").length,
   };
 
   return (
@@ -253,8 +254,8 @@ export default function AuditPage() {
                       {/* Dot */}
                       <div style={{
                         width: "7px", height: "7px", borderRadius: "50%", flexShrink: 0, marginTop: "4px",
-                        background: l.severity === "critical" ? "#f43f5e" : l.severity === "warning" ? "#f59e0b" : "#38bdf8",
-                        boxShadow: l.severity === "critical" ? "0 0 6px #f43f5e" : "none",
+                        background: l.status === "critical" ? "#f43f5e" : l.status === "warning" ? "#f59e0b" : "#38bdf8",
+                        boxShadow: l.status === "critical" ? "0 0 6px #f43f5e" : "none",
                       }}/>
 
                       {/* Content */}
@@ -264,11 +265,14 @@ export default function AuditPage() {
                           {l.username && (
                             <span style={{ fontSize: "11px", color: "#38bdf8", fontFamily: MONO }}>{l.username}</span>
                           )}
+                          {l.hostname && l.hostname !== "System" && (
+                            <span style={{ fontSize: "10px", color: "rgba(122,143,166,0.5)", fontFamily: MONO }}>· {l.hostname}</span>
+                          )}
                         </div>
                         <div style={{ fontSize: "12px", color: "rgba(122,143,166,0.6)" }}>{l.detail || "—"}</div>
-                        {l.sha256 && (
+                        {l.hash && (
                           <div style={{ fontSize: "10px", fontFamily: MONO, color: "rgba(61,80,104,0.6)", marginTop: "4px" }}>
-                            SHA-256: {l.sha256.slice(0, 24)}…
+                            SHA-256: {l.hash}
                           </div>
                         )}
                       </div>
@@ -311,7 +315,7 @@ export default function AuditPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                {["#", "Time", "User", "Action", "Detail", "Hash", "Verify"].map(h => (
+                {["#", "Time", "User", "Machine", "Action", "Detail", "Hash", "Verify"].map(h => (
                   <th key={h} style={{
                     textAlign: "left", padding: "12px 14px",
                     fontSize: "9px", color: "rgba(122,143,166,0.4)",
@@ -332,9 +336,10 @@ export default function AuditPage() {
                     <td style={{ padding: "10px 14px", color: "rgba(61,80,104,0.6)", fontFamily: MONO, fontSize: "10px" }}>{l.id}</td>
                     <td style={{ padding: "10px 14px", color: "rgba(122,143,166,0.5)", fontFamily: MONO, fontSize: "10px", whiteSpace: "nowrap" }}>{l.timestamp?.slice(0, 16).replace("T", " ")}</td>
                     <td style={{ padding: "10px 14px", color: "#38bdf8", fontFamily: MONO, fontSize: "11px" }}>{l.username || "system"}</td>
+                    <td style={{ padding: "10px 14px", color: "rgba(122,143,166,0.5)", fontFamily: MONO, fontSize: "11px" }}>{l.hostname || "—"}</td>
                     <td style={{ padding: "10px 14px" }}><ActionBadge action={l.action} /></td>
                     <td style={{ padding: "10px 14px", color: "rgba(122,143,166,0.6)", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.detail}</td>
-                    <td style={{ padding: "10px 14px", fontFamily: MONO, fontSize: "10px", color: "rgba(61,80,104,0.5)" }}>{l.sha256?.slice(0, 12)}…</td>
+                    <td style={{ padding: "10px 14px", fontFamily: MONO, fontSize: "10px", color: "rgba(61,80,104,0.5)" }}>{l.hash}</td>
                     <td style={{ padding: "10px 14px" }}>
                       {v ? (
                         <span style={{ fontSize: "10px", fontFamily: MONO, color: v.valid ? "#10b981" : "#f43f5e" }}>

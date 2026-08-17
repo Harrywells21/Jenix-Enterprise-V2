@@ -34,6 +34,7 @@ def get_audit_logs(limit: int = 200,
                  .order_by(AuditLog.timestamp.desc())\
                  .limit(limit).all()
     machines = {m.id: m.hostname for m in db.query(Machine).all()}
+    users    = {u.id: u.name for u in db.query(User).all()}
 
     result = []
     for l in logs:
@@ -43,6 +44,7 @@ def get_audit_logs(limit: int = 200,
             "machine_id": l.machine_id,
             "hostname":   machines.get(l.machine_id, "System"),
             "user_id":    l.user_id,
+            "username":   users.get(l.user_id, "System"),
             "action":     l.action,
             "detail":     l.detail,
             "status":     l.status,

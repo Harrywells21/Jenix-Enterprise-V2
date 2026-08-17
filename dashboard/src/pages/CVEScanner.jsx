@@ -79,10 +79,10 @@ export default function CVEScanner() {
       setMachines(r.data || []);
       if (r.data?.length > 0) setSelected(String(r.data[0].id));
     }).catch(() => {});
-    api.get("/api/nodes").then(r => {
+    api.get("/api/machines").then(r => {
       const nodes = r.data || [];
       if (nodes.length > 0) {
-        api.get(`/api/nodes/${nodes[0].id}/scan/latest`)
+        api.get(`/api/cve/results/${nodes[0].id}`)
           .then(s => setSummary(s.data))
           .catch(() => {});
       }
@@ -93,15 +93,15 @@ export default function CVEScanner() {
     if (!selected) return showToast("Select a machine first", "error");
     setScanning(true); setResults(null);
     try {
-      await api.post(`/api/nodes/${selected}/scan`);
+      await api.post(`/api/cve/scan/${selected}`);
       showToast("CVE scan initiated — checking packages...", "success");
       const interval = setInterval(async () => {
         try {
-          const r = await api.get(`/api/nodes/${selected}/scan/latest`);
+          const r = await api.get(`/api/cve/results/${selected}`);
           if (r.data && !r.data.message) {
             setResults(r.data); setScanning(false);
             clearInterval(interval);
-            showToast(`Scan complete — ${r.data.findings?.length || 0} CVEs found`, r.data.critical_cve > 0 ? "error" : "success");
+            showToast(`Scan complete — ${(r.data.results || []).reduce((n, p) => n + (p.vulns?.length || 0), 0)} CVEs found`, r.data.critical > 0 ? "error" : "success");
           }
         } catch {}
       }, 3000);
@@ -112,7 +112,7 @@ export default function CVEScanner() {
     }
   };
 
-  const findings = results?.findings || [];
+  const findings = (results?.results || []).flatMap(p => (p.vulns || []).map(v => ({...v, package: p.package, version: p.version})));
   const filtered = sevFilter === "ALL" ? findings : findings.filter(f => f.severity?.toUpperCase() === sevFilter);
 
   const sevCounts = findings.reduce((acc, f) => {
@@ -249,17 +249,17 @@ export default function CVEScanner() {
           <div style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
             padding: "16px 20px", marginBottom: "16px",
-            background: results.critical_cve > 0 ? "rgba(244,63,94,0.06)" : "rgba(16,185,129,0.06)",
-            border: `1px solid ${results.critical_cve > 0 ? "rgba(244,63,94,0.2)" : "rgba(16,185,129,0.2)"}`,
+            background: results?.critical > 0 ? "rgba(244,63,94,0.06)" : "rgba(16,185,129,0.06)",
+            border: `1px solid ${results?.critical > 0 ? "rgba(244,63,94,0.2)" : "rgba(16,185,129,0.2)"}`,
             borderRadius: "12px",
           }}>
             <div>
               <div style={{
                 fontFamily: DISP, fontSize: "16px", fontWeight: 700,
-                color: results.critical_cve > 0 ? "#f43f5e" : "#10b981",
+                color: results?.critical > 0 ? "#f43f5e" : "#10b981",
                 marginBottom: "3px",
               }}>
-                {results.critical_cve > 0 ? "⚠ Critical Vulnerabilities Detected" : "✓ No Critical Vulnerabilities"}
+                {results?.critical > 0 ? "⚠ Critical Vulnerabilities Detected" : "✓ No Critical Vulnerabilities"}
               </div>
               <div style={{ fontSize: "12px", color: "rgba(122,143,166,0.6)", fontFamily: MONO }}>
                 {findings.length} total CVEs found across all packages

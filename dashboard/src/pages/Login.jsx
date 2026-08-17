@@ -18,7 +18,7 @@ export default function Login() {
     setLoading(true); setError("");
     try {
       const res = await login(email, password);
-      loginSuccess(res.data.token, { name: res.data.username, role: res.data.role });
+      loginSuccess(res.data.access_token, { name: res.data.name, role: res.data.role });
       navigate("/");
     } catch {
       setError("Invalid credentials. Please try again.");

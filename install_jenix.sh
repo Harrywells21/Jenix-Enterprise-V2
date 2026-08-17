@@ -4,8 +4,7 @@
 
 set -e
 
-GITHUB="https://github.com/Harrywells21/Jenix-Enterprise"
-RELEASES="https://github.com/Harrywells21/Jenix-Enterprise/releases/download/v1.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo ""
 echo "╔══════════════════════════════════════════════╗"
@@ -48,9 +47,9 @@ linux)
     pip3 install websockets psutil requests --quiet --break-system-packages 2>/dev/null || \
     pip3 install websockets psutil requests --quiet
 
-    echo "[4/5] Downloading JENIX Agent..."
+    echo "[4/5] Installing JENIX Agent..."
     mkdir -p ~/.jenix
-    curl -fsSL "$RELEASES/JenixAgent-linux" -o ~/.jenix/JenixAgent
+    cp "$SCRIPT_DIR/releases/JenixAgent-linux" ~/.jenix/JenixAgent
     chmod +x ~/.jenix/JenixAgent
 
     echo "[5/5] Setting up auto-start..."
@@ -124,10 +123,13 @@ macos)
     pip3 install websockets psutil requests --quiet 2>/dev/null || \
     pip install websockets psutil requests --quiet
 
-    echo "[4/5] Downloading JENIX Agent..."
+    echo "[4/5] Installing JENIX Agent..."
     mkdir -p ~/.jenix
-    curl -fsSL "$RELEASES/JenixAgent-macos" -o ~/.jenix/JenixAgent 2>/dev/null || \
-    curl -fsSL "$RELEASES/JenixAgent-linux" -o ~/.jenix/JenixAgent
+    if [ -f "$SCRIPT_DIR/releases/JenixAgent-macos" ]; then
+        cp "$SCRIPT_DIR/releases/JenixAgent-macos" ~/.jenix/JenixAgent
+    else
+        cp "$SCRIPT_DIR/releases/JenixAgent-linux" ~/.jenix/JenixAgent
+    fi
     chmod +x ~/.jenix/JenixAgent
 
     echo "[5/5] Setting up auto-start..."
@@ -172,8 +174,8 @@ PLIST
     echo ""
     echo "⚠ Could not detect OS automatically."
     echo ""
-    echo "Please download the agent manually from:"
-    echo "  $GITHUB/releases"
+    echo "Please run the agent manually from the releases/ folder"
+    echo "included in this package, or contact support."
     echo ""
     echo "Windows users: Run this in PowerShell (Admin):"
     echo "  iwr -useb http://YOUR_SERVER:8000/api/agent/install/windows | iex"

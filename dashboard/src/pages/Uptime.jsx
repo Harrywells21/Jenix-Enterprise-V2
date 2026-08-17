@@ -1,14 +1,11 @@
-import { useState, useEffect, useRef } from "react";
-import api, { getMachines } from "../api";
+import { useState, useEffect } from "react";
+import { getMachines } from "../api";
 
 const MONO = "'JetBrains Mono', monospace";
 const FONT = "'Cabinet Grotesk', sans-serif";
 const DISP = "'Syne', sans-serif";
 
 function UptimeBar({ checks = [] }) {
-  const total = checks.length || 90;
-  const filled = checks.filter(Boolean).length || Math.floor(total * 0.97);
-  const pct = Math.round((filled / total) * 100 * 10) / 10;
 
   return (
     <div>
@@ -145,7 +142,7 @@ export default function Uptime() {
     .filter(m => !(m.is_online || m.status === "online"))
     .map(m => ({
       title: `${m.hostname} Unreachable`,
-      detail: `Node ${m.ip_address || m.hostname} stopped responding to health checks`,
+      detail: `Node ${m.ip || m.hostname} stopped responding to health checks`,
       time: new Date(m.last_seen || Date.now()).toLocaleString(),
       resolved: false,
     }));
@@ -231,7 +228,7 @@ export default function Uptime() {
                     <div>
                       <div style={{ fontFamily: DISP, fontSize: "15px", fontWeight: 700 }}>{m.hostname}</div>
                       <div style={{ fontSize: "11px", color: "rgba(122,143,166,0.5)", fontFamily: MONO, marginTop: "1px" }}>
-                        {m.ip_address || m.os_pretty || "Linux"} · {online ? "Operational" : "Offline"}
+                        {m.ip || m.os_pretty || "Linux"} · {online ? "Operational" : "Offline"}
                       </div>
                     </div>
                   </div>

@@ -31,3 +31,18 @@ Thumbs.db
 
 # Venv
 jenix_clean/venv/
+
+# Fleet master key test material — private key must never enter git
+test_keys/
+
+# Server virtual environment
+server_venv/
+
+# Backup files from patching sessions
+*.bak
+*.bak2
+*.bak3
+*.bak4
+
+# Old DB schema archive
+*.OLD_SCHEMA_ARCHIVE*

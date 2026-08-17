@@ -1,4 +1,5 @@
 import asyncio, json
+from sqlalchemy.orm.exc import StaleDataError, ObjectDeletedError
 from fastapi import WebSocket, WebSocketDisconnect
 from datetime import datetime
 from typing import Dict
@@ -109,26 +110,74 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                 finally:
                     db.close()
 
-            elif msg_type == "cmd_output":
-                cmd_id = data.get("cmd_id")
-                output = data.get("output", "")
-                status = data.get("status", "running")
+            elif msg_type == "command_result":
+                cmd_id = data.get("command_id")
+                result = data.get("data", {})
+                exit_code = result.get("exit_code", -1)
+                output_lines = result.get("output", [])
+                output_text = "\n".join(output_lines) if isinstance(output_lines, list) else str(output_lines)
+                status = "completed" if exit_code == 0 else "failed"
                 db = SessionLocal()
                 try:
                     from db import Command
                     cmd = db.query(Command)\
                             .filter(Command.id == cmd_id).first()
                     if cmd:
-                        cmd.output    += output
+                        cmd.output     = output_text
                         cmd.status     = status
                         cmd.updated_at = datetime.utcnow()
                         db.commit()
                     await _broadcast_dashboards({
-                        "type":   "cmd_output",
+                        "type":      "command_result",
+                        "cmd_id":    cmd_id,
+                        "output":    output_text,
+                        "status":    status,
+                        "exit_code": exit_code,
+                    })
+                finally:
+                    db.close()
+
+            elif msg_type == "cmd_output":
+                cmd_id       = data.get("cmd_id")
+                output_chunk = data.get("output", "")
+                status       = data.get("status", "running")
+                db = SessionLocal()
+                try:
+                    from db import Command
+                    cmd = db.query(Command)\
+                            .filter(Command.id == cmd_id).first()
+                    if cmd:
+                        cmd.output     = (cmd.output or "") + output_chunk
+                        cmd.status     = status
+                        cmd.updated_at = datetime.utcnow()
+                        db.commit()
+                    await _broadcast_dashboards({
+                        "type":   "command_result",
                         "cmd_id": cmd_id,
-                        "output": output,
+                        "output": output_chunk,
                         "status": status,
                     })
+                finally:
+                    db.close()
+
+            elif msg_type == "snapshot":
+                db = SessionLocal()
+                try:
+                    from db import Snapshot
+                    m = db.query(Machine).filter(Machine.token == token).first()
+                    if m:
+                        db.merge(Snapshot(
+                            id=data.get("snapshot_id"),
+                            machine_id=m.id,
+                            reason=data.get("reason", ""),
+                        ))
+                        db.commit()
+                        await _broadcast_dashboards({
+                            "type": "snapshot_created",
+                            "machine_id": m.id,
+                            "snapshot_id": data.get("snapshot_id"),
+                            "reason": data.get("reason", ""),
+                        })
                 finally:
                     db.close()
 
@@ -143,21 +192,26 @@ async def agent_endpoint(websocket: WebSocket, token: str):
         _agents.pop(token, None)
         db = SessionLocal()
         try:
-            m = db.query(Machine)\
-                  .filter(Machine.token == token).first()
-            if m:
-                m.status = "offline"
-                db.commit()
-                from notifications import notify_machine_offline
-                from alert_cooldown import should_create_alert
-                if should_create_alert(m.id, "offline"):
-                    asyncio.create_task(asyncio.to_thread(
-                        notify_machine_offline, m.hostname, m.ip))
-                await _broadcast_dashboards({
-                    "type":       "status",
-                    "machine_id": m.id,
-                    "status":     "offline",
-                })
+            try:
+                m = db.query(Machine)\
+                      .filter(Machine.token == token).first()
+                if m:
+                    m.status = "offline"
+                    db.commit()
+                    from notifications import notify_machine_offline
+                    from alert_cooldown import should_create_alert
+                    if should_create_alert(m.id, "offline"):
+                        asyncio.create_task(asyncio.to_thread(
+                            notify_machine_offline, m.hostname, m.ip))
+                    await _broadcast_dashboards({
+                        "type":       "status",
+                        "machine_id": m.id,
+                        "status":     "offline",
+                    })
+            except (StaleDataError, ObjectDeletedError):
+                db.rollback()
+                print(f"[WS] Machine already removed before disconnect cleanup, skipping")
+
         finally:
             db.close()
         print(f"[WS] Agent disconnected: {hostname}")
