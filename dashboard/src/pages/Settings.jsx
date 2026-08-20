@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { getNotifyConfig, updateNotifyConfig, testNotification } from "../api";
+import { getNotifyConfig, updateNotifyConfig, testNotification, changePassword } from "../api";
 
 const MONO = "'JetBrains Mono', monospace";
 const FONT = "'Cabinet Grotesk', sans-serif";
@@ -55,6 +55,8 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [pwForm, setPwForm] = useState({ current: "", next: "", confirm: "" });
+  const [changingPw, setChangingPw] = useState(false);
   const [form, setForm] = useState({
     slack_webhook: "", teams_webhook: "", alert_email: "",
     smtp_host: "", smtp_port: 587, smtp_user: "", smtp_pass: "",
@@ -159,6 +161,59 @@ export default function Settings() {
           textDecoration: "none", whiteSpace: "nowrap",
         }}>Go there →</Link>
       </div>
+
+      {/* Account Security */}
+      <Section title="Account Security">
+        <SettingRow label="Current Password">
+          <input type="password" value={pwForm.current}
+            onChange={e => setPwForm(p => ({ ...p, current: e.target.value }))}
+            style={{ ...inputStyle, width: "220px" }} />
+        </SettingRow>
+        <SettingRow label="New Password" desc="At least 8 characters">
+          <input type="password" value={pwForm.next}
+            onChange={e => setPwForm(p => ({ ...p, next: e.target.value }))}
+            style={{ ...inputStyle, width: "220px" }} />
+        </SettingRow>
+        <SettingRow label="Confirm New Password">
+          <input type="password" value={pwForm.confirm}
+            onChange={e => setPwForm(p => ({ ...p, confirm: e.target.value }))}
+            style={{ ...inputStyle, width: "220px" }} />
+        </SettingRow>
+        <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: "14px" }}>
+          <button
+            disabled={changingPw}
+            onClick={async () => {
+              if (pwForm.next.length < 8) {
+                showToast("New password must be at least 8 characters", "error");
+                return;
+              }
+              if (pwForm.next !== pwForm.confirm) {
+                showToast("New passwords do not match", "error");
+                return;
+              }
+              setChangingPw(true);
+              try {
+                await changePassword(pwForm.current, pwForm.next);
+                showToast("Password changed successfully", "success");
+                setPwForm({ current: "", next: "", confirm: "" });
+              } catch (e) {
+                showToast(e.response?.data?.detail || e.message, "error");
+              } finally {
+                setChangingPw(false);
+              }
+            }}
+            style={{
+              padding: "9px 20px",
+              background: changingPw ? "rgba(56,189,248,0.06)" : "rgba(56,189,248,0.1)",
+              border: "1px solid rgba(56,189,248,0.25)",
+              borderRadius: "8px", color: changingPw ? "rgba(56,189,248,0.3)" : "#38bdf8",
+              fontSize: "12px", fontWeight: 600,
+              cursor: changingPw ? "not-allowed" : "pointer",
+              fontFamily: FONT,
+            }}
+          >{changingPw ? "Changing..." : "Change Password"}</button>
+        </div>
+      </Section>
 
       {/* Alerting */}
       <Section title="Alert Channels">
