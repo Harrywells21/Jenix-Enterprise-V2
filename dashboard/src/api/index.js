@@ -34,6 +34,12 @@ export const getMachine       = (id)        => api.get(`/api/machines/${id}`);
 export const deleteMachine    = (id)        => api.delete(`/api/machines/${id}`);
 export const getLogs          = (id)        => api.get(`/api/machines/${id}/logs`);
 
+// Pending enrollment
+export const getPendingMachines = ()   => api.get("/api/machines/pending");
+export const getInstallCommand  = ()   => api.get("/api/machines/install-command");
+export const approveMachine     = (id) => api.post(`/api/machines/${id}/approve`);
+export const rejectMachine      = (id) => api.post(`/api/machines/${id}/reject`);
+
 // Metrics
 export const getMetrics = (id) => api.get(`/api/machines/${id}/metrics`);
 export const getLatest  = (id) => api.get(`/api/machines/${id}/metrics/latest`);

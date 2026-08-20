@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { getFleetOverview, getAllAlerts, markAllRead, fleetCommand, getSavings } from "../api";
+import { getFleetOverview, getAllAlerts, markAllRead, fleetCommand, getSavings, getPendingMachines, getInstallCommand, approveMachine, rejectMachine } from "../api";
 
 /* ── Stat Card ── */
 function StatCard({ label, value, sub, accent, icon, delay = 0 }) {
@@ -162,6 +162,9 @@ export default function Fleet() {
   const [toast,     setToast]     = useState(null);
   const [cmdOutput, setCmdOutput] = useState([]);
   const [tab,       setTab]       = useState("alerts");
+  const [pending,   setPending]   = useState([]);
+  const [showInstall, setShowInstall] = useState(false);
+  const [installCmd,  setInstallCmd]  = useState(null);
   const navigate = useNavigate();
 
   const showToast = (msg, type = "success") => {
@@ -174,6 +177,7 @@ export default function Fleet() {
       getFleetOverview().then(r => setOverview(r.data)).catch(() => {});
       getAllAlerts().then(r => setAlerts(r.data?.alerts || r.data || [])).catch(() => {});
       getSavings().then(r => setSavings(r.data)).catch(() => {});
+      getPendingMachines().then(r => setPending(r.data || [])).catch(() => {});
     };
     load();
     const iv = setInterval(load, 15_000);
@@ -191,6 +195,37 @@ export default function Fleet() {
       const line = `[${new Date().toLocaleTimeString()}] ${type.toUpperCase()} dispatched → ${r.data?.dispatched || 0} nodes`;
       setCmdOutput(p => [line, ...p.slice(0, 19)]);
       showToast(`${COMMAND_LABELS[type] || type} sent to all online nodes`, "success");
+    } catch (e) {
+      showToast(e.response?.data?.detail || e.message, "error");
+    }
+  };
+
+  const handleApprove = async (id, hostname) => {
+    try {
+      await approveMachine(id);
+      setPending(p => p.filter(m => m.id !== id));
+      showToast(`${hostname} approved`, "success");
+    } catch (e) {
+      showToast(e.response?.data?.detail || e.message, "error");
+    }
+  };
+
+  const handleReject = async (id, hostname) => {
+    try {
+      await rejectMachine(id);
+      setPending(p => p.filter(m => m.id !== id));
+      showToast(`${hostname} rejected`, "success");
+    } catch (e) {
+      showToast(e.response?.data?.detail || e.message, "error");
+    }
+  };
+
+  const handleShowInstall = async () => {
+    if (showInstall) { setShowInstall(false); return; }
+    try {
+      const r = await getInstallCommand();
+      setInstallCmd(r.data);
+      setShowInstall(true);
     } catch (e) {
       showToast(e.response?.data?.detail || e.message, "error");
     }
@@ -335,8 +370,138 @@ export default function Fleet() {
             onMouseOver={e => { e.currentTarget.style.background = "rgba(245,158,11,0.15)"; }}
             onMouseOut={e => { e.currentTarget.style.background = "rgba(245,158,11,0.08)"; }}
           >⚡ Clean ALL</button>
+          <button
+            onClick={handleShowInstall}
+            style={{
+              padding: "9px 16px",
+              background: showInstall ? "rgba(139,92,246,0.15)" : "rgba(139,92,246,0.08)",
+              border: "1px solid rgba(139,92,246,0.25)",
+              borderRadius: "8px", color: "#8b5cf6",
+              fontSize: "12px", fontWeight: 600,
+              cursor: "pointer", fontFamily: "'Cabinet Grotesk', sans-serif",
+              letterSpacing: "0.04em", transition: "all 0.2s",
+            }}
+            onMouseOver={e => { e.currentTarget.style.background = "rgba(139,92,246,0.18)"; }}
+            onMouseOut={e => { e.currentTarget.style.background = showInstall ? "rgba(139,92,246,0.15)" : "rgba(139,92,246,0.08)"; }}
+          >+ Add Node</button>
         </div>
       </div>
+
+      {/* Install Command Panel */}
+      {showInstall && installCmd && (
+        <div style={{
+          padding: "16px 18px", marginBottom: "24px",
+          background: "rgba(139,92,246,0.06)",
+          border: "1px solid rgba(139,92,246,0.2)",
+          borderRadius: "12px",
+          animation: "fadeIn 0.3s ease",
+        }}>
+          <div style={{
+            fontSize: "12px", fontWeight: 700, color: "#8b5cf6",
+            fontFamily: "'Syne', sans-serif", marginBottom: "8px",
+          }}>Run this on the target machine</div>
+          <div style={{
+            display: "flex", alignItems: "center", gap: "10px",
+            background: "#060812", border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: "8px", padding: "10px 14px",
+          }}>
+            <code style={{
+              flex: 1, fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "12px", color: "#e8f0fe", overflowX: "auto",
+              whiteSpace: "nowrap",
+            }}>{installCmd.command}</code>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(installCmd.command);
+                showToast("Copied to clipboard", "success");
+              }}
+              style={{
+                padding: "6px 12px", flexShrink: 0,
+                background: "rgba(139,92,246,0.12)",
+                border: "1px solid rgba(139,92,246,0.3)",
+                borderRadius: "6px", color: "#8b5cf6",
+                fontSize: "11px", fontWeight: 600, cursor: "pointer",
+                fontFamily: "'Cabinet Grotesk', sans-serif",
+              }}
+            >Copy</button>
+          </div>
+          <div style={{
+            fontSize: "11px", color: "rgba(122,143,166,0.6)",
+            fontFamily: "'JetBrains Mono', monospace",
+            marginTop: "10px", lineHeight: 1.5,
+          }}>{installCmd.note}</div>
+        </div>
+      )}
+
+      {/* Pending Nodes Banner */}
+      {pending.length > 0 && (
+        <div style={{
+          padding: "14px 18px", marginBottom: "24px",
+          background: "rgba(245,158,11,0.07)",
+          border: "1px solid rgba(245,158,11,0.25)",
+          borderRadius: "12px",
+          animation: "fadeIn 0.4s ease",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <div style={{
+                width: "8px", height: "8px", borderRadius: "50%",
+                background: "#f59e0b", boxShadow: "0 0 10px #f59e0b",
+                animation: "pulse 1.5s infinite",
+              }}/>
+              <span style={{
+                color: "#f59e0b", fontWeight: 700, fontSize: "14px",
+                fontFamily: "'Syne', sans-serif",
+              }}>
+                {pending.length} Node{pending.length > 1 ? "s" : ""} Awaiting Approval
+              </span>
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {pending.map(m => (
+              <div key={m.id} style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "10px 14px",
+                background: "rgba(255,255,255,0.02)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: "8px",
+              }}>
+                <div style={{ fontSize: "13px", color: "#e8f0fe" }}>
+                  <span style={{ fontWeight: 600 }}>{m.hostname}</span>
+                  <span style={{
+                    color: "rgba(122,143,166,0.6)", marginLeft: "10px",
+                    fontFamily: "'JetBrains Mono', monospace", fontSize: "11px",
+                  }}>{m.ip} · {m.os_name}</span>
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={() => handleApprove(m.id, m.hostname)}
+                    style={{
+                      padding: "6px 14px",
+                      background: "rgba(16,185,129,0.12)",
+                      border: "1px solid rgba(16,185,129,0.3)",
+                      borderRadius: "6px", color: "#10b981",
+                      fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                      fontFamily: "'Cabinet Grotesk', sans-serif",
+                    }}
+                  >Approve</button>
+                  <button
+                    onClick={() => handleReject(m.id, m.hostname)}
+                    style={{
+                      padding: "6px 14px",
+                      background: "rgba(244,63,94,0.1)",
+                      border: "1px solid rgba(244,63,94,0.3)",
+                      borderRadius: "6px", color: "#f43f5e",
+                      fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                      fontFamily: "'Cabinet Grotesk', sans-serif",
+                    }}
+                  >Reject</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Critical Alert Banner */}
       {critical.length > 0 && (
