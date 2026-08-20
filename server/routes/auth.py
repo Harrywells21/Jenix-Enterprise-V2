@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from db import get_db, User
 from auth import (authenticate_user, create_token, hash_password,
-                  get_current_user, require_admin, oauth2)
+                  verify_password, get_current_user, require_admin, oauth2)
 from security import blacklist_token, is_token_blacklisted, rate_limit_login
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -14,6 +14,10 @@ class UserCreate(BaseModel):
     email:    str
     password: str
     role:     str = "viewer"
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password:     str
 
 class UserOut(BaseModel):
     id:        int
@@ -49,6 +53,20 @@ def logout(token: str = Depends(oauth2)):
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)):
     return current_user
+
+@router.post("/change-password")
+def change_password(body: ChangePasswordRequest,
+                    current_user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    if not verify_password(body.current_password, current_user.password_hash):
+        raise HTTPException(status_code=401,
+                            detail="Current password is incorrect")
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400,
+                            detail="New password must be at least 8 characters")
+    current_user.password_hash = hash_password(body.new_password)
+    db.commit()
+    return {"ok": True, "message": "Password changed successfully"}
 
 @router.get("/users", response_model=list[UserOut])
 def list_users(db: Session = Depends(get_db),
