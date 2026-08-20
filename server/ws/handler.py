@@ -19,7 +19,12 @@ async def agent_endpoint(websocket: WebSocket, token: str):
     try:
         m = db.query(Machine).filter(Machine.token == token).first()
         if not m:
+            _agents.pop(token, None)
             await websocket.close(code=4001)
+            return
+        if m.status == "pending":
+            _agents.pop(token, None)
+            await websocket.close(code=4003)
             return
         m.status    = "online"
         m.last_seen = datetime.utcnow()
