@@ -74,6 +74,7 @@ class Machine(Base):
     schedules   = relationship("Schedule", back_populates="machine", cascade="all, delete")
     reports     = relationship("Report",   back_populates="machine", cascade="all, delete")
     alerts      = relationship("Alert",    back_populates="machine", cascade="all, delete")
+    cve_scans   = relationship("CveScan",  back_populates="machine", cascade="all, delete")
 
 
 class Metric(Base):
@@ -149,6 +150,36 @@ class Report(Base):
     size_kb      = Column(Float, default=0.0)
     created_at   = Column(DateTime, default=datetime.utcnow)
     machine      = relationship("Machine", back_populates="reports")
+
+
+class CveScan(Base):
+    __tablename__ = "cve_scans"
+    id                   = Column(Integer, primary_key=True, index=True)
+    machine_id           = Column(Integer, ForeignKey("machines.id"), nullable=False)
+    triggered_by_id      = Column(Integer, ForeignKey("users.id"), nullable=True)
+    triggered_by_name    = Column(String, default="System")
+    scanned_at           = Column(DateTime, default=datetime.utcnow)
+    packages_scanned     = Column(Integer, default=0)
+    vulnerable_packages  = Column(Integer, default=0)
+    total_vulns          = Column(Integer, default=0)
+    critical             = Column(Integer, default=0)
+    high                 = Column(Integer, default=0)
+    risk_level           = Column(String, default="LOW")
+    machine              = relationship("Machine", back_populates="cve_scans")
+    findings             = relationship("CveFinding", back_populates="scan", cascade="all, delete")
+
+
+class CveFinding(Base):
+    __tablename__ = "cve_findings"
+    id         = Column(Integer, primary_key=True, index=True)
+    scan_id    = Column(Integer, ForeignKey("cve_scans.id"), nullable=False)
+    package    = Column(String, nullable=False)
+    version    = Column(String, default="")
+    cve_id     = Column(String, nullable=False)
+    summary    = Column(Text, default="")
+    severity   = Column(String, default="UNKNOWN")
+    url        = Column(String, default="")
+    scan       = relationship("CveScan", back_populates="findings")
 
 
 class Alert(Base):
