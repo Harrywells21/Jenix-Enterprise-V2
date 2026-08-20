@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const BASE = "http://localhost:8000";
+const BASE = window.location.origin;
 
 let _token = null;
 export const setToken = (t) => { _token = t; };
@@ -91,7 +91,8 @@ export const testNotification   = (type) => api.post("/api/settings/notification
 
 // WebSocket
 export const connectDashboardWS = (onMessage) => {
-  const ws = new WebSocket("ws://localhost:8000/ws/dashboard");
+  const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${wsProto}//${window.location.host}/ws/dashboard`);
   ws.onmessage = (e) => onMessage(JSON.parse(e.data));
   ws.onerror   = (e) => console.error("[WS] error", e);
   ws.onclose   = ()  => console.log("[WS] dashboard disconnected");
