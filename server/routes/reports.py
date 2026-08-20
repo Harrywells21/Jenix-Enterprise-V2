@@ -421,6 +421,168 @@ def generate_fleet_report(body: FleetReportRequest = FleetReportRequest(),
     }
 
 
+def _generate_audit_pdf(logs: list, machines: dict, users: dict) -> tuple:
+    import hashlib, json
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
+                                    Table, TableStyle, HRFlowable, PageBreak)
+    from reportlab.lib.units import cm
+
+    fname = f"jenix_audit_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+    fpath = os.path.join(REPORTS_DIR, fname)
+    doc = SimpleDocTemplate(fpath, pagesize=A4,
+                            leftMargin=2*cm, rightMargin=2*cm,
+                            topMargin=2*cm, bottomMargin=2*cm)
+    styles = getSampleStyleSheet()
+    story = []
+
+    title_style = ParagraphStyle("title", fontSize=24, textColor=colors.HexColor("#00bcd4"),
+                                 spaceAfter=6, fontName="Helvetica-Bold")
+    h2_style = ParagraphStyle("h2", fontSize=14, textColor=colors.HexColor("#00bcd4"),
+                              spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
+    body_style = styles["BodyText"]
+    small_style = ParagraphStyle("small", fontSize=8, textColor=colors.HexColor("#999999"),
+                                 fontName="Helvetica")
+
+    def _fingerprint(l):
+        data = {
+            "id": l.id, "machine_id": l.machine_id, "user_id": l.user_id,
+            "action": l.action, "detail": l.detail, "status": l.status,
+            "timestamp": l.timestamp.isoformat(),
+        }
+        return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+    story.append(Spacer(1, 2*cm))
+    story.append(Paragraph("JENIX Enterprise", title_style))
+    story.append(Paragraph("Audit Trail Report", h2_style))
+    story.append(HRFlowable(width="100%", color=colors.HexColor("#00bcd4")))
+    story.append(Spacer(1, 0.5*cm))
+    story.append(Paragraph("<b>Scope:</b> All machines, full audit history", body_style))
+    story.append(Paragraph(f"<b>Generated:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", body_style))
+    story.append(Spacer(1, 1*cm))
+
+    story.append(Paragraph("Executive Summary", h2_style))
+    story.append(HRFlowable(width="100%", color=colors.HexColor("#333333")))
+    story.append(Spacer(1, 0.3*cm))
+
+    total = len(logs)
+    ok_count   = sum(1 for l in logs if l.status == "ok")
+    warn_count = sum(1 for l in logs if l.status == "warning")
+    crit_count = sum(1 for l in logs if l.status == "critical")
+    first_ts = min((l.timestamp for l in logs), default=None)
+    last_ts  = max((l.timestamp for l in logs), default=None)
+
+    story.append(Paragraph(f"Total Log Entries: {total}", body_style))
+    story.append(Paragraph(
+        f"Date Range: {first_ts.strftime('%Y-%m-%d %H:%M') if first_ts else 'N/A'} "
+        f"to {last_ts.strftime('%Y-%m-%d %H:%M') if last_ts else 'N/A'}", body_style))
+    story.append(Paragraph(f"OK: {ok_count}   Warning: {warn_count}   Critical: {crit_count}", body_style))
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph(
+        "Each entry below includes a SHA256 content fingerprint computed from its recorded "
+        "fields (ID, machine, user, action, detail, status, timestamp). Recomputing this hash "
+        "from an exported entry and comparing it to the value shown confirms the entry's content "
+        "has not changed since export. It is a per-entry content fingerprint, not a cryptographic "
+        "chain linking entries together.", small_style))
+    story.append(Spacer(1, 0.5*cm))
+
+    story.append(Paragraph("Activity Breakdown by Action Type", h2_style))
+    story.append(HRFlowable(width="100%", color=colors.HexColor("#333333")))
+    story.append(Spacer(1, 0.3*cm))
+    action_counts = {}
+    for l in logs:
+        action_counts[l.action] = action_counts.get(l.action, 0) + 1
+    action_data = [["Action Type", "Count"]] + [
+        [a, c] for a, c in sorted(action_counts.items(), key=lambda x: -x[1])
+    ]
+    t_actions = Table(action_data, colWidths=[10*cm, 4*cm])
+    t_actions.setStyle(TableStyle([
+        ("BACKGROUND",    (0,0), (-1,0), colors.HexColor("#1e1e2e")),
+        ("TEXTCOLOR",     (0,0), (-1,0), colors.HexColor("#00bcd4")),
+        ("FONTNAME",      (0,0), (-1,0), "Helvetica-Bold"),
+        ("ROWBACKGROUNDS",(0,1), (-1,-1),
+         [colors.HexColor("#2a2a3e"), colors.HexColor("#1e1e2e")]),
+        ("TEXTCOLOR",     (0,1), (-1,-1), colors.white),
+        ("GRID",          (0,0), (-1,-1), 0.5, colors.HexColor("#333333")),
+        ("ALIGN",         (0,0), (-1,-1), "CENTER"),
+        ("PADDING",       (0,0), (-1,-1), 6),
+    ]))
+    story.append(t_actions)
+    story.append(Spacer(1, 0.5*cm))
+
+    story.append(Paragraph("Activity Breakdown by Status", h2_style))
+    story.append(HRFlowable(width="100%", color=colors.HexColor("#333333")))
+    story.append(Spacer(1, 0.3*cm))
+    status_data = [["Status", "Count"], ["ok", ok_count], ["warning", warn_count], ["critical", crit_count]]
+    t_status = Table(status_data, colWidths=[10*cm, 4*cm])
+    t_status.setStyle(TableStyle([
+        ("BACKGROUND",    (0,0), (-1,0), colors.HexColor("#1e1e2e")),
+        ("TEXTCOLOR",     (0,0), (-1,0), colors.HexColor("#00bcd4")),
+        ("FONTNAME",      (0,0), (-1,0), "Helvetica-Bold"),
+        ("ROWBACKGROUNDS",(0,1), (-1,-1),
+         [colors.HexColor("#2a2a3e"), colors.HexColor("#1e1e2e")]),
+        ("TEXTCOLOR",     (0,1), (-1,-1), colors.white),
+        ("GRID",          (0,0), (-1,-1), 0.5, colors.HexColor("#333333")),
+        ("ALIGN",         (0,0), (-1,-1), "CENTER"),
+        ("PADDING",       (0,0), (-1,-1), 6),
+    ]))
+    story.append(t_status)
+
+    story.append(PageBreak())
+    story.append(Paragraph("Full Audit Log", h2_style))
+    story.append(HRFlowable(width="100%", color=colors.HexColor("#333333")))
+    story.append(Spacer(1, 0.3*cm))
+    if logs:
+        log_data = [["Timestamp", "Machine", "User", "Action", "Detail", "Status", "Fingerprint"]]
+        for l in logs:
+            log_data.append([
+                l.timestamp.strftime("%Y-%m-%d %H:%M"),
+                machines.get(l.machine_id, "System"),
+                users.get(l.user_id, "System"),
+                l.action,
+                textwrap.shorten(l.detail, 35),
+                l.status,
+                _fingerprint(l)[:12] + "...",
+            ])
+        t_log = Table(log_data, colWidths=[2.6*cm, 2.4*cm, 2*cm, 2.6*cm, 4.5*cm, 1.8*cm, 2.6*cm],
+                     repeatRows=1)
+        t_log.setStyle(TableStyle([
+            ("BACKGROUND",    (0,0), (-1,0), colors.HexColor("#1e1e2e")),
+            ("TEXTCOLOR",     (0,0), (-1,0), colors.HexColor("#00bcd4")),
+            ("FONTNAME",      (0,0), (-1,0), "Helvetica-Bold"),
+            ("ROWBACKGROUNDS",(0,1), (-1,-1),
+             [colors.HexColor("#2a2a3e"), colors.HexColor("#1e1e2e")]),
+            ("TEXTCOLOR",     (0,1), (-1,-1), colors.white),
+            ("GRID",          (0,0), (-1,-1), 0.5, colors.HexColor("#333333")),
+            ("FONTSIZE",      (0,0), (-1,-1), 7),
+            ("PADDING",       (0,0), (-1,-1), 4),
+        ]))
+        story.append(t_log)
+    else:
+        story.append(Paragraph("No audit entries found.", body_style))
+
+    doc.build(story)
+    return fname, fpath
+
+
+@router.post("/audit")
+def generate_audit_report(db: Session = Depends(get_db),
+                          current_user: User = Depends(require_operator)):
+    logs     = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(1000).all()
+    machines = {m.id: m.hostname for m in db.query(Machine).all()}
+    users    = {u.id: u.name for u in db.query(User).all()}
+
+    fname, fpath = _generate_audit_pdf(logs, machines, users)
+    size_kb = os.path.getsize(fpath) / 1024
+    report  = Report(machine_id=0, report_type="audit",
+                     filename=fname, filepath=fpath, size_kb=round(size_kb, 1))
+    db.add(report); db.commit(); db.refresh(report)
+    return {"report_id": report.id, "filename": fname,
+            "size_kb": report.size_kb, "total_entries": len(logs)}
+
+
 @router.post("/{machine_id}")
 def generate_report(machine_id: int,
                     db: Session = Depends(get_db),
