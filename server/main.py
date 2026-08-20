@@ -223,3 +223,19 @@ def root():
   </div>
 </body>
 </html>"""
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_spa_fallback(full_path: str):
+    from fastapi.responses import FileResponse
+    from fastapi import HTTPException
+
+    reserved_prefixes = ("api/", "static/", "ws/")
+    reserved_exact = ("install", "health", "dashboard")
+
+    if full_path.startswith(reserved_prefixes) or full_path in reserved_exact:
+        raise HTTPException(status_code=404)
+
+    index_path = os.path.join(static_dir, "index.html")
+    if not os.path.exists(index_path):
+        raise HTTPException(status_code=404)
+    return FileResponse(index_path)
