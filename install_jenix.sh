@@ -12,6 +12,17 @@ echo "║     JENIX Enterprise — Universal Installer   ║"
 echo "╚══════════════════════════════════════════════╝"
 echo ""
 
+# ── Ask for the JENIX server address ────────────────────────────────────────
+# The agent has no auto-discovery — it must be told where the server is.
+if [ -z "$JENIX_SERVER" ]; then
+    echo "Where is your JENIX Enterprise server running?"
+    echo "  (e.g. http://192.168.1.10:8000 or https://jenix.yourcompany.com)"
+    read -p "Server address [http://localhost:8000]: " SERVER_INPUT
+    JENIX_SERVER="${SERVER_INPUT:-http://localhost:8000}"
+fi
+echo "Using JENIX server: $JENIX_SERVER"
+echo ""
+
 # ── Detect OS ─────────────────────────────────────────────────────────────────
 detect_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
@@ -79,6 +90,7 @@ ExecStart=$HOME/.jenix/JenixAgent
 Restart=always
 RestartSec=10
 Environment=DISPLAY=:0
+Environment=JENIX_SERVER=$JENIX_SERVER
 
 [Install]
 WantedBy=multi-user.target
@@ -94,7 +106,7 @@ SERVICE
     echo "║                                              ║"
     echo "║   • Desktop shortcut created                 ║"
     echo "║   • Double-click JenixAgent on Desktop       ║"
-    echo "║   • App will auto-discover your JENIX server ║"
+    echo "║   • Connected to: $JENIX_SERVER"
     echo "╚══════════════════════════════════════════════╝"
     echo ""
 
@@ -102,7 +114,7 @@ SERVICE
     read -p "Launch JENIX Agent now? [Y/n] " -n 1 -r
     echo ""
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        ~/.jenix/JenixAgent &
+        JENIX_SERVER="$JENIX_SERVER" ~/.jenix/JenixAgent &
         echo "✓ JENIX Agent launched!"
     fi
     ;;
@@ -145,6 +157,10 @@ macos)
     <array><string>$HOME/.jenix/JenixAgent</string></array>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>JENIX_SERVER</key><string>$JENIX_SERVER</string>
+    </dict>
 </dict>
 </plist>
 PLIST
@@ -156,7 +172,7 @@ PLIST
     echo "║   ✅ JENIX Agent Installed!                  ║"
     echo "║                                              ║"
     echo "║   • Agent starts automatically on login      ║"
-    echo "║   • App will auto-discover your JENIX server ║"
+    echo "║   • Connected to: $JENIX_SERVER"
     echo "║   • Check ~/.jenix/ for logs                 ║"
     echo "╚══════════════════════════════════════════════╝"
     echo ""
@@ -164,7 +180,7 @@ PLIST
     read -p "Launch JENIX Agent now? [Y/n] " -n 1 -r
     echo ""
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        ~/.jenix/JenixAgent &
+        JENIX_SERVER="$JENIX_SERVER" ~/.jenix/JenixAgent &
         echo "✓ JENIX Agent launched!"
     fi
     ;;
