@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from db import get_db, Machine, AuditLog, hash_passphrase
@@ -35,7 +35,8 @@ def register(body: MachineRegister, db: Session = Depends(get_db)):
     if existing:
         existing.os_name   = body.os_name
         existing.kernel    = body.kernel
-        existing.status    = "offline"  # WS handler (agent_endpoint) sets "online" once truly connected
+        if existing.status != "pending":
+            existing.status = "offline"  # WS handler (agent_endpoint) sets "online" once truly connected
         existing.last_seen = datetime.utcnow()
         db.commit()
         return {"token": existing.token, "machine_id": existing.id}
@@ -43,12 +44,12 @@ def register(body: MachineRegister, db: Session = Depends(get_db)):
     machine = Machine(
         hostname=body.hostname, ip=body.ip,
         os_name=body.os_name,  kernel=body.kernel,
-        token=token, status="offline"  # WS handler (agent_endpoint) sets "online" once truly connected
+        token=token, status="pending"  # requires admin approval before it can connect over WS
     )
     db.add(machine); db.commit(); db.refresh(machine)
     log = AuditLog(machine_id=machine.id, action="registered",
-                   detail=f"{body.hostname} ({body.ip}) joined",
-                   status="ok")
+                   detail=f"{body.hostname} ({body.ip}) joined — pending admin approval",
+                   status="warning")
     db.add(log); db.commit()
     return {"token": token, "machine_id": machine.id}
 
@@ -57,6 +58,69 @@ def register(body: MachineRegister, db: Session = Depends(get_db)):
 def list_machines(db: Session = Depends(get_db),
                   _:  User    = Depends(get_current_user)):
     return db.query(Machine).order_by(Machine.hostname).all()
+
+# ── Pending enrollment (admin approve/reject new nodes) ─────────────────────
+@router.get("/pending")
+def list_pending_machines(db: Session = Depends(get_db),
+                          _: User = Depends(require_admin)):
+    rows = (db.query(Machine).filter(Machine.status == "pending")
+             .order_by(Machine.created_at.desc()).all())
+    return [{
+        "id": m.id, "hostname": m.hostname, "ip": m.ip,
+        "os_name": m.os_name, "kernel": m.kernel,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+    } for m in rows]
+
+@router.get("/install-command")
+def get_install_command(request: Request,
+                        _: User = Depends(require_admin)):
+    """Returns the real, working one-liner for the dashboard's Add Node
+    modal. Points at the actual GET /install route (server/main.py),
+    which serves install_jenix.sh directly."""
+    server_addr = request.url.hostname
+    server_port = request.url.port or 8000
+    scheme      = request.url.scheme
+    base        = f"{scheme}://{server_addr}:{server_port}"
+    return {
+        "command": f"curl -sSL {base}/install | bash",
+        "note": "Run on the target Linux/macOS machine. It installs the "
+                "agent, registers with this server, and the machine will "
+                "appear below awaiting approval.",
+    }
+
+@router.post("/{machine_id}/approve")
+def approve_machine(machine_id: int, db: Session = Depends(get_db),
+                    current_user: User = Depends(require_admin)):
+    m = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    if m.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Machine is not pending (status={m.status})")
+    m.status = "offline"  # ready to connect; WS handler sets "online" once it actually does
+    db.commit()
+    log = AuditLog(machine_id=machine_id, user_id=current_user.id,
+                   action="node_approved",
+                   detail=f"{m.hostname} ({m.ip}) approved by {current_user.name}",
+                   status="ok")
+    db.add(log); db.commit()
+    return {"status": "approved", "machine_id": machine_id}
+
+@router.post("/{machine_id}/reject")
+def reject_machine(machine_id: int, db: Session = Depends(get_db),
+                   current_user: User = Depends(require_admin)):
+    m = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    if m.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Machine is not pending (status={m.status})")
+    hostname, ip = m.hostname, m.ip
+    db.delete(m); db.commit()
+    log = AuditLog(machine_id=None, user_id=current_user.id,
+                   action="node_rejected",
+                   detail=f"{hostname} ({ip}) rejected by {current_user.name}",
+                   status="warning")
+    db.add(log); db.commit()
+    return {"status": "rejected"}
 
 # ── Single machine ─────────────────────────────────────────────────────────
 @router.get("/{machine_id}", response_model=MachineOut)
