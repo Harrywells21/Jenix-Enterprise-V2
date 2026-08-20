@@ -112,8 +112,17 @@ os.makedirs(static_dir, exist_ok=True)
 
 @app.get("/install")
 def installer():
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse("/static/install.sh")
+    """Serves the real agent installer (install_jenix.sh, repo root) so a
+    new node can enroll with one command. Previously redirected to
+    /static/install.sh, a file that does not exist on disk — this was a
+    real 404 for anyone following AGENT_INSTALL_GUIDE.md's documented
+    one-liner. Serving the actual, already-fixed installer directly."""
+    from fastapi.responses import FileResponse
+    installer_path = os.path.join(os.path.dirname(__file__), "..", "install_jenix.sh")
+    if not os.path.exists(installer_path):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Installer script not found on server")
+    return FileResponse(installer_path, media_type="text/x-sh", filename="install_jenix.sh")
 
 @app.get("/dashboard", include_in_schema=False)
 @app.get("/dashboard/{full_path:path}", include_in_schema=False)
