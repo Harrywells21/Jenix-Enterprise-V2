@@ -150,15 +150,22 @@ export default function Machine() {
       .catch(() => setLoading(false));
 
     wsRef.current = connectDashboardWS(msg => {
-      if (msg.type === "metrics_update" && String(msg.node_id) === String(id)) {
-        const d = msg.data || {};
+      if (msg.type === "metrics" && String(msg.machine_id) === String(id)) {
         setGraphData(prev => [...prev, {
           t:    prev.length,
-          cpu:  d.cpu?.cpu_percent    || 0,
-          ram:  d.memory?.ram_percent || 0,
-          disk: d.disks?.[0]?.percent || 0,
-          net:  0,
+          cpu:  msg.cpu  || 0,
+          ram:  msg.ram  || 0,
+          disk: msg.disk || 0,
+          net:  msg.net_mb || 0,
         }].slice(-60));
+        setMachine(prev => prev ? {
+          ...prev,
+          cpu: msg.cpu,
+          ram: msg.ram,
+          disk: msg.disk,
+          last_seen: msg.timestamp,
+          status: "online",
+        } : prev);
       }
       if (msg.type === "cmd_output") {
         setTerminal(prev => prev + msg.output);

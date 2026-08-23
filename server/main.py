@@ -124,6 +124,27 @@ def installer():
         raise HTTPException(status_code=404, detail="Installer script not found on server")
     return FileResponse(installer_path, media_type="text/x-sh", filename="install_jenix.sh")
 
+@app.get("/agent-binary/{os_name}")
+def agent_binary(os_name: str):
+    """Serves pre-built agent binaries so install_jenix.sh can download the
+    correct binary for the target machine at install time, instead of
+    assuming a releases/ folder travels alongside the downloaded script
+    (it never does on a fresh machine - this was the sale-blocking bug
+    found during the Kali VM cross-machine smoke test)."""
+    from fastapi.responses import FileResponse
+    from fastapi import HTTPException
+    binary_map = {
+        "linux": "JenixAgent-linux",
+        "macos": "JenixAgent-macos",
+    }
+    filename = binary_map.get(os_name)
+    if not filename:
+        raise HTTPException(status_code=404, detail=f"No agent binary available for os '{os_name}'")
+    binary_path = os.path.join(os.path.dirname(__file__), "..", "releases", filename)
+    if not os.path.exists(binary_path):
+        raise HTTPException(status_code=404, detail=f"Agent binary '{filename}' not found on server")
+    return FileResponse(binary_path, media_type="application/octet-stream", filename="JenixAgent")
+
 @app.get("/dashboard", include_in_schema=False)
 @app.get("/dashboard/{full_path:path}", include_in_schema=False)
 def serve_dashboard(full_path: str = ""):

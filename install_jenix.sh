@@ -60,7 +60,11 @@ linux)
 
     echo "[4/5] Installing JENIX Agent..."
     mkdir -p ~/.jenix
-    cp "$SCRIPT_DIR/releases/JenixAgent-linux" ~/.jenix/JenixAgent
+    if ! curl -sf "$JENIX_SERVER/agent-binary/linux" -o ~/.jenix/JenixAgent; then
+        echo "      ERROR: failed to download agent binary from $JENIX_SERVER/agent-binary/linux"
+        echo "      Check that the JENIX server is reachable at that address."
+        exit 1
+    fi
     chmod +x ~/.jenix/JenixAgent
 
     echo "[5/5] Setting up auto-start..."
@@ -137,10 +141,12 @@ macos)
 
     echo "[4/5] Installing JENIX Agent..."
     mkdir -p ~/.jenix
-    if [ -f "$SCRIPT_DIR/releases/JenixAgent-macos" ]; then
-        cp "$SCRIPT_DIR/releases/JenixAgent-macos" ~/.jenix/JenixAgent
-    else
-        cp "$SCRIPT_DIR/releases/JenixAgent-linux" ~/.jenix/JenixAgent
+    if ! curl -sf "$JENIX_SERVER/agent-binary/macos" -o ~/.jenix/JenixAgent; then
+        echo "      macOS binary not available on server, falling back to Linux binary..."
+        if ! curl -sf "$JENIX_SERVER/agent-binary/linux" -o ~/.jenix/JenixAgent; then
+            echo "      ERROR: failed to download agent binary from $JENIX_SERVER"
+            exit 1
+        fi
     fi
     chmod +x ~/.jenix/JenixAgent
 
