@@ -5,7 +5,17 @@ from pathlib import Path
 
 TOKEN_FILE   = Path.home() / ".jenix" / "agent.token"
 MACHINE_FILE = Path.home() / ".jenix" / "agent.machine_id"
-SERVER_URL   = os.getenv("JENIX_SERVER", "http://localhost:8000")
+SERVER_FILE  = Path.home() / ".jenix" / "server_url"
+def _load_server_url() -> str:
+    env = os.getenv("JENIX_SERVER")
+    if env:
+        return env
+    if SERVER_FILE.exists():
+        saved = SERVER_FILE.read_text().strip()
+        if saved:
+            return saved
+    return "http://localhost:8000"
+SERVER_URL   = _load_server_url()
 WS_URL       = SERVER_URL.replace("http://", "ws://").replace("https://", "wss://")
 METRICS_INTERVAL = 2
 RECONNECT_DELAY  = 5

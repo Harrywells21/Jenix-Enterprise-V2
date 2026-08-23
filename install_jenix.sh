@@ -66,6 +66,7 @@ linux)
         exit 1
     fi
     chmod +x ~/.jenix/JenixAgent
+    echo "$JENIX_SERVER" > ~/.jenix/server_url
 
     echo "[5/5] Setting up auto-start..."
     # Create desktop shortcut
@@ -91,10 +92,10 @@ After=network-online.target
 
 [Service]
 ExecStart=$HOME/.jenix/JenixAgent
+User=$(whoami)
 Restart=always
 RestartSec=10
 Environment=DISPLAY=:0
-Environment=JENIX_SERVER=$JENIX_SERVER
 
 [Install]
 WantedBy=multi-user.target
@@ -149,6 +150,7 @@ macos)
         fi
     fi
     chmod +x ~/.jenix/JenixAgent
+    echo "$JENIX_SERVER" > ~/.jenix/server_url
 
     echo "[5/5] Setting up auto-start..."
     # Create LaunchAgent
