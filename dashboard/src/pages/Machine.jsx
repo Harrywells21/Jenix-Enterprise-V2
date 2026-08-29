@@ -4,7 +4,7 @@ import {
   YAxis, Tooltip,
   ResponsiveContainer, AreaChart, Area
 } from "recharts";
-import { getMachine, sendCommand, getLogs, connectDashboardWS, getMachineScore, getSnapshots, setNodePassphrase, clearNodePassphrase, getPassphraseStatus } from "../api";
+import { getMachine, sendCommand, sendExecCommand, getLogs, connectDashboardWS, getMachineScore, getSnapshots, setNodePassphrase, clearNodePassphrase, getPassphraseStatus } from "../api";
 
 const FONT = "'Cabinet Grotesk', sans-serif";
 const MONO = "'JetBrains Mono', monospace";
@@ -113,6 +113,9 @@ export default function Machine() {
   const [modalError, setModalError] = useState("");
   const [showSetPassModal, setShowSetPassModal] = useState(false);
   const [newPassphrase, setNewPassphrase] = useState("");
+  const [execScript,    setExecScript]    = useState("");
+  const [execSignature, setExecSignature] = useState("");
+  const [execRunning,   setExecRunning]   = useState(false);
 
   const termRef = useRef(null);
   const wsRef   = useRef(null);
@@ -215,6 +218,26 @@ export default function Machine() {
     const { cmd, params, label } = pendingAction;
     setPendingAction(null);
     await dispatchCommand(cmd, params, label, modalPassphrase);
+  };
+
+  const handleRunExec = async () => {
+    if (!execScript.trim() || !execSignature.trim()) {
+      showToast("Script and signature are both required", "error");
+      return;
+    }
+    try {
+      setExecRunning(true);
+      setCmdStatus("running");
+      setTerminal(`> Running signed script on ${machine?.hostname}...\n`);
+      await sendExecCommand(id, execScript, execSignature);
+      showToast("Signed script dispatched", "success");
+    } catch (e) {
+      setTerminal(prev => prev + `Error: ${e.response?.data?.detail || e.message}\n`);
+      setCmdStatus("failed");
+      showToast(e.response?.data?.detail || e.message, "error");
+    } finally {
+      setExecRunning(false);
+    }
   };
 
   const handleSetPassphrase = async () => {
@@ -376,6 +399,36 @@ export default function Machine() {
       </div>
 
       {/* Tab: Metrics */}
+      {activeTab === "terminal" && (
+        <div style={{ marginBottom: "20px", background: "#0f1420", border: "1px solid #1f2937", borderRadius: "8px", padding: "16px" }}>
+          <div style={{ fontSize: "11px", letterSpacing: "1px", color: "#64748b", marginBottom: "10px", textTransform: "uppercase" }}>
+            Run Signed Script
+          </div>
+          <div style={{ fontSize: "12px", color: "#94a3b8", marginBottom: "10px" }}>
+            Runs as the unprivileged agent user (no sudo). Requires a script signed offline with your fleet master private key — sign it with <code>tools/sign_script.py</code>, never paste the private key here.
+          </div>
+          <textarea
+            value={execScript}
+            onChange={e => setExecScript(e.target.value)}
+            placeholder="e.g. sudo -n apt-get install -y htop"
+            rows={4}
+            style={{ width: "100%", background: "#020617", color: "#e2e8f0", border: "1px solid #1f2937", borderRadius: "6px", padding: "10px", fontFamily: "monospace", fontSize: "13px", marginBottom: "10px", resize: "vertical" }}
+          />
+          <input
+            value={execSignature}
+            onChange={e => setExecSignature(e.target.value)}
+            placeholder="Base64 signature from tools/sign_script.py"
+            style={{ width: "100%", background: "#020617", color: "#e2e8f0", border: "1px solid #1f2937", borderRadius: "6px", padding: "10px", fontFamily: "monospace", fontSize: "13px", marginBottom: "10px" }}
+          />
+          <button
+            onClick={handleRunExec}
+            disabled={execRunning}
+            style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: "6px", padding: "8px 16px", cursor: execRunning ? "not-allowed" : "pointer", opacity: execRunning ? 0.6 : 1 }}
+          >
+            {execRunning ? "Running..." : "Run Script"}
+          </button>
+        </div>
+      )}
       {activeTab === "metrics" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
           <MetricChart data={graphData} dataKey="cpu"  color="#38bdf8" label="CPU Usage"    unit="%" />

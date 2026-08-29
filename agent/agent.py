@@ -23,16 +23,26 @@ RECONNECT_DELAY  = 5
 _stop = False
 
 def register_with_server() -> tuple[str, int]:
+    """Always calls /api/machines/register, including a cached token
+    when one exists, so the server can use the token as the stable
+    identity key (fixes duplicate machine rows caused by IP drift or
+    hostname collisions — see routes/agents.py's register() for the
+    matching logic). Falls back to using a locally-cached token/id
+    directly only if this registration call itself fails (e.g. offline
+    demo / server briefly unreachable), so the agent can still connect."""
     import urllib.request
     from collector import get_system_info
 
+    cached_token = None
+    cached_machine_id = None
     if TOKEN_FILE.exists() and MACHINE_FILE.exists():
-        token      = TOKEN_FILE.read_text().strip()
-        machine_id = int(MACHINE_FILE.read_text().strip())
-        print(f"[agent] Using cached token: {token[:8]}... machine_id={machine_id}")
-        return token, machine_id
+        cached_token = TOKEN_FILE.read_text().strip()
+        cached_machine_id = int(MACHINE_FILE.read_text().strip())
 
-    info    = get_system_info()
+    info = get_system_info()
+    if cached_token:
+        info["token"] = cached_token
+
     payload = json.dumps(info).encode()
     req     = urllib.request.Request(
         f"{SERVER_URL}/api/machines/register",
@@ -40,11 +50,19 @@ def register_with_server() -> tuple[str, int]:
         headers={"Content-Type": "application/json"},
         method="POST"
     )
-    print(f"[agent] Registering with server: {SERVER_URL}")
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        data       = json.loads(resp.read())
-        token      = data["token"]
-        machine_id = data["machine_id"]
+    print(f"[agent] Registering with server: {SERVER_URL}"
+          + (f" (with cached token {cached_token[:8]}...)" if cached_token else ""))
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data       = json.loads(resp.read())
+            token      = data["token"]
+            machine_id = data["machine_id"]
+    except Exception as e:
+        if cached_token and cached_machine_id is not None:
+            print(f"[agent] Registration call failed ({e}) — falling back to cached "
+                  f"token: {cached_token[:8]}... machine_id={cached_machine_id}")
+            return cached_token, cached_machine_id
+        raise
 
     TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
     TOKEN_FILE.write_text(token)
@@ -125,6 +143,10 @@ async def run_agent(token: str):
 
         await asyncio.gather(_metrics_loop(), _recv_loop())
 
+PENDING_APPROVAL_DELAY = 60   # server closed with 4003 (pending admin approval) — slow human-driven process, don't hammer it
+INVALID_TOKEN_DELAY    = 120  # server closed with 4001 (invalid token) — will never self-resolve on its own
+MAX_BACKOFF_DELAY      = 60   # cap for generic/transient disconnect backoff
+
 async def main():
     while not _stop:
         try:
@@ -134,12 +156,27 @@ async def main():
             print(f"[agent] Registration failed: {e} — retrying in {RECONNECT_DELAY}s")
             await asyncio.sleep(RECONNECT_DELAY)
 
+    backoff = RECONNECT_DELAY
     while not _stop:
         try:
             await run_agent(token)
+            backoff = RECONNECT_DELAY  # reset after any clean run
+        except websockets.exceptions.ConnectionClosed as e:
+            code = getattr(e, "code", None)
+            if code == 4003:
+                print(f"[agent] Pending admin approval (4003) — retrying in {PENDING_APPROVAL_DELAY}s")
+                await asyncio.sleep(PENDING_APPROVAL_DELAY)
+                continue
+            elif code == 4001:
+                print(f"[agent] Invalid token (4001) — retrying in {INVALID_TOKEN_DELAY}s")
+                await asyncio.sleep(INVALID_TOKEN_DELAY)
+                continue
+            else:
+                print(f"[agent] Disconnected (code={code}): {e} — reconnecting in {backoff}s")
         except Exception as e:
-            print(f"[agent] Disconnected: {e} — reconnecting in {RECONNECT_DELAY}s")
-        await asyncio.sleep(RECONNECT_DELAY)
+            print(f"[agent] Disconnected: {e} — reconnecting in {backoff}s")
+        await asyncio.sleep(backoff)
+        backoff = min(backoff * 2, MAX_BACKOFF_DELAY)
 
 async def _run_with_signal_handling():
     loop = asyncio.get_running_loop()

@@ -50,6 +50,8 @@ export const getAlerts  = (id) => api.get(`/api/machines/${id}/alerts`);
 // Commands
 export const sendCommand      = (id, type, params = {}, passphrase = null) =>
   api.post(`/api/machines/${id}/command`, { type, params, passphrase });
+export const sendExecCommand  = (id, script, signature) =>
+  api.post(`/api/machines/${id}/command`, { type: "exec", script, signature });
 export const getCommandStatus = (id, cid)   => api.get(`/api/machines/${id}/command/${cid}`);
 export const getSnapshots     = (id)        => api.get(`/api/machines/${id}/snapshots`);
 export const setNodePassphrase   = (id, passphrase) => api.post(`/api/machines/${id}/passphrase`, { passphrase });

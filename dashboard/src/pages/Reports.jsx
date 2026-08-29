@@ -47,9 +47,26 @@ export default function Reports() {
 
     getAuditLogs().then(r => setAuditLogs(r.data || [])).catch(() => {});
 
-    api.get("/api/fleet/stats")
-      .then(r => setFleetStats(r.data))
-      .catch(() => {});
+    Promise.all([
+      api.get("/api/analytics/fleet"),
+      api.get("/api/analytics/savings"),
+    ]).then(([fleetRes, savingsRes]) => {
+      const f = fleetRes.data;
+      const s = savingsRes.data;
+      setFleetStats({
+        online_nodes: f.online,
+        total_nodes: f.total,
+        avg_cpu: f.avg_cpu,
+        avg_ram: f.avg_ram,
+        avg_disk: f.avg_disk,
+        open_alerts: f.critical_alerts + f.warning_alerts,
+        commands_today: f.commands_24h,
+        estimated_savings: Math.round(s.annual_savings),
+        hourly_rate: s.hourly_rate,
+        // fleet_uptime and os_breakdown have no backend source (server/routes/analytics.py
+        // has no such fields) — dropped rather than left as fabricated placeholder values.
+      });
+    }).catch(() => {});
   }, []);
 
   const generatePDF = async () => {
@@ -88,7 +105,7 @@ export default function Reports() {
   const online  = fleetStats?.online_nodes  || machines.filter(m => m.is_online || m.status === "online").length;
   const total   = fleetStats?.total_nodes   || machines.length;
   const savings = fleetStats?.estimated_savings || online * 810;
-  const uptime  = fleetStats?.fleet_uptime  || "99.9%";
+  const uptime  = null; // no backend source for uptime tracking yet
   const cmdToday = fleetStats?.commands_today || auditLogs.filter(l => l.timestamp?.startsWith(new Date().toISOString().slice(0,10))).length;
 
   const recentLogs = auditLogs.slice(0, 8);
@@ -170,7 +187,7 @@ export default function Reports() {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "12px", marginBottom: "20px" }}>
           <ROICard label="Annual Savings"   value={`$${savings.toLocaleString()}`} sub="Estimated vs manual ops" accent="#10b981" icon="◈" />
-          <ROICard label="Fleet Uptime"     value={uptime}           sub="Last 30 days"           accent="#38bdf8" icon="◎" />
+          <ROICard label="Fleet Uptime"     value={uptime || "N/A"} sub="Not yet tracked"        accent="#7a8fa6" icon="◎" />
           <ROICard label="Machines Online"  value={`${online}/${total}`} sub="Connected nodes"     accent="#8b5cf6" icon="⬡" />
           <ROICard label="Commands Today"   value={cmdToday}         sub="Automated operations"   accent="#f59e0b" icon="▷" />
           <ROICard label="Hrs Saved/Mo"     value={`${(online * 12)}h`} sub="~$45/hr engineering" accent="#10b981" icon="◈" />
@@ -199,21 +216,8 @@ export default function Reports() {
             ))}
           </div>
 
-          {/* OS breakdown */}
-          {fleetStats?.os_breakdown && Object.keys(fleetStats.os_breakdown).length > 0 && (
-            <div style={{ marginTop: "16px", paddingTop: "14px", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-              <div style={{ fontSize: "10px", color: "rgba(122,143,166,0.4)", fontFamily: MONO, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "8px" }}>OS Distribution</div>
-              {Object.entries(fleetStats.os_breakdown).map(([os, count]) => (
-                <div key={os} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "5px" }}>
-                  <span style={{ fontSize: "12px", color: "rgba(122,143,166,0.6)", flex: 1 }}>{os}</span>
-                  <div style={{ width: "80px", height: "3px", background: "rgba(255,255,255,0.05)", borderRadius: "2px", overflow: "hidden" }}>
-                    <div style={{ width: `${(count / total) * 100}%`, height: "100%", background: "#38bdf8", borderRadius: "2px" }}/>
-                  </div>
-                  <span style={{ fontFamily: MONO, fontSize: "11px", color: "#38bdf8", minWidth: "16px", textAlign: "right" }}>{count}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* OS breakdown: no backend field for this yet — removed rather than left
+             silently blank, since server/routes/analytics.py has no os_breakdown data. */}
         </div>
 
         {/* Recent activity */}

@@ -13,6 +13,9 @@ class MachineRegister(BaseModel):
     ip:       str
     os_name:  str = ""
     kernel:   str = ""
+    token:    str | None = None  # cached token from a prior registration, if any -
+                                  # used as the primary identity key to prevent
+                                  # duplicate rows from IP drift or hostname collisions
 
 class MachineOut(BaseModel):
     id:        int
@@ -28,11 +31,22 @@ class MachineOut(BaseModel):
 # ── Register (called by agent) ─────────────────────────────────────────────
 @router.post("/register")
 def register(body: MachineRegister, db: Session = Depends(get_db)):
-    existing = db.query(Machine).filter(
-        Machine.hostname == body.hostname,
-        Machine.ip == body.ip
-    ).first()
+    """Matches on the agent's cached token first (stable identity across
+    IP/hostname drift). Falls back to the legacy (hostname, ip) match
+    only when no token is sent (a genuine first-time registration) or
+    the sent token doesn't match any row (e.g. DB was reset) - in which
+    case a fresh token/row is issued, same as before this fix."""
+    existing = None
+    if body.token:
+        existing = db.query(Machine).filter(Machine.token == body.token).first()
+    if not existing:
+        existing = db.query(Machine).filter(
+            Machine.hostname == body.hostname,
+            Machine.ip == body.ip
+        ).first()
     if existing:
+        existing.hostname  = body.hostname
+        existing.ip        = body.ip
         existing.os_name   = body.os_name
         existing.kernel    = body.kernel
         if existing.status != "pending":

@@ -2,7 +2,7 @@
 JENIX Tamper-proof Audit System
 Each log entry is hashed with SHA256 to detect tampering.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from db import get_db, AuditLog, Machine, User
@@ -73,24 +73,29 @@ def verify_log(log_id: int,
 
 @router.get("/logs/export")
 def export_audit_csv(
+    request: Request,
     token: str = Query(None),
     db: Session = Depends(get_db)
 ):
-    """CSV export — accepts token as query param so the browser can trigger
-    a direct download link (a plain <a href> can't attach an Authorization
-    header)."""
-    if not token:
-        raise HTTPException(status_code=401, detail="Token required")
-    try:
-        SECRET = os.getenv("SECRET_KEY", "jenix_secret")
-        payload = jwt.decode(token, SECRET, algorithms=["HS256"])
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    """CSV export — accepts token as query param (for plain <a href> browser
+    downloads, which can't attach an Authorization header) OR a normal
+    Authorization header (needed when this route is called server-to-server,
+    e.g. proxied from the JENIX master control plane, which always sends
+    Bearer tokens via headers)."""
+    from auth import decode_token
+
+    raw_token = token
+    if not raw_token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            raw_token = auth_header[7:]
+
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    payload = decode_token(raw_token)
+    if not payload.get("sub"):
+        raise HTTPException(status_code=401, detail="Invalid token payload")
 
     logs     = db.query(AuditLog)\
                  .order_by(AuditLog.timestamp.desc())\

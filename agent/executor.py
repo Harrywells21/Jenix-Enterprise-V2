@@ -1,7 +1,9 @@
-import subprocess, threading, shutil, json
+import subprocess, threading, shutil, json, os, time
+from pathlib import Path
 import snapshot as snap
 from snapshot import sudo_available
 import fleet_auth
+import topology_auth
 
 def _detect_pkg_manager():
     if shutil.which("apt-get"):
@@ -74,6 +76,49 @@ def execute_command(cmd_type: str, cmd_id: int, send_fn, params: dict | None = N
             except Exception as e:
                 send_fn({"type": "cmd_output", "cmd_id": cmd_id, "output": f"[ERROR] {e}\n", "status": "failed"})
         threading.Thread(target=_run_exec, daemon=True).start()
+        return
+
+    if cmd_type == "reassign_server":
+        def _run_reassign():
+            server_url = (params.get("server_url") or "").strip()
+            signature  = params.get("signature")
+            if not server_url or not signature:
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": "[REASSIGN] Missing server_url or signature — rejected\n",
+                         "status": "failed"})
+                return
+            payload = json.dumps({"type": "reassign_server", "server_url": server_url},
+                                  sort_keys=True, separators=(",", ":")).encode()
+            if not topology_auth.verify_signature(payload, signature):
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": "[REASSIGN] Signature verification failed — this command was not "
+                                   "authenticated with the fleet topology key. Rejected, nothing changed.\n",
+                         "status": "failed"})
+                return
+            if not topology_auth.is_trusted_floor(server_url):
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": f"[REASSIGN] '{server_url}' is not in this agent's baked-in trusted floor "
+                                   f"list. Rejected — rebuild/rebake this agent if the floor list changed.\n",
+                         "status": "failed"})
+                return
+            send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                     "output": f"[REASSIGN] Verified. Repointing this node to {server_url} and restarting...\n",
+                     "status": "done"})
+            try:
+                server_file  = Path.home() / ".jenix" / "server_url"
+                token_file   = Path.home() / ".jenix" / "agent.token"
+                machine_file = Path.home() / ".jenix" / "agent.machine_id"
+                server_file.parent.mkdir(parents=True, exist_ok=True)
+                server_file.write_text(server_url)
+                token_file.unlink(missing_ok=True)
+                machine_file.unlink(missing_ok=True)
+            except Exception as e:
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": f"[REASSIGN] Failed writing new config: {e}\n", "status": "failed"})
+                return
+            time.sleep(1.5)
+            os._exit(0)
+        threading.Thread(target=_run_reassign, daemon=True).start()
         return
 
     if cmd_type == "rollback":

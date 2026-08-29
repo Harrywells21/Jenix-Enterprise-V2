@@ -45,7 +45,7 @@ def discover_server():
     for ip in candidates:
         for port in COMMON_PORTS:
             try:
-                url = f"http://{ip}:{port}/api/agent/ping"
+                url = f"http://{ip}:{port}/health"
                 import urllib.request
                 req = urllib.request.urlopen(url, timeout=DISCOVERY_TIMEOUT)
                 data = json.loads(req.read())
@@ -57,6 +57,20 @@ def discover_server():
 
 # ── GUI ───────────────────────────────────────────────────────────────────────
 class JenixAgentGUI:
+    def _find_cli_agent_binary(self):
+        """Locate the compiled CLI agent binary this GUI subprocess-launches.
+        Looks next to this GUI's own executable when frozen (PyInstaller),
+        or next to this script during development."""
+        if getattr(sys, "frozen", False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+        for name in ("JenixAgentCLI", "JenixAgent-linux", "JenixAgent"):
+            candidate = os.path.join(base_dir, name)
+            if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+        return None
+
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("JENIX Enterprise Agent")
@@ -225,18 +239,19 @@ class JenixAgentGUI:
             # Test server reachability
             try:
                 import urllib.request
-                req = urllib.request.urlopen(f"{url}/api/agent/ping", timeout=5)
+                req = urllib.request.urlopen(f"{url}/health", timeout=5)
                 data = json.loads(req.read())
                 if data.get("status") != "ok":
                     raise Exception("Server not responding correctly")
             except Exception as e:
+                err_msg = str(e)  # capture before 'e' is auto-cleared at except-block exit
                 def _fail():
-                    self._log(f"✗ Cannot reach server: {e}")
+                    self._log(f"✗ Cannot reach server: {err_msg}")
                     self._set_status("FAILED", "#ff4466", f"Cannot reach {url}")
                     self.connect_btn.configure(state="normal", text="⚡  Connect")
                     messagebox.showerror("Connection Failed",
                         f"Cannot reach JENIX server at:\n{url}\n\n"
-                        f"Error: {e}\n\n"
+                        f"Error: {err_msg}\n\n"
                         "Make sure:\n"
                         "• Server is running\n"
                         "• URL is correct\n"
@@ -267,12 +282,15 @@ class JenixAgentGUI:
                 self.discover_btn.configure(state="disabled")
             self.root.after(0, _success)
             
-            # Run the actual agent
-            agent_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jenix_agent.py")
-            if os.path.exists(agent_path):
+            # Run the actual agent — launches the already-fixed compiled
+            # CLI binary as a subprocess (single source of truth for all
+            # agent logic: reconnect backoff, token-based registration,
+            # IP-dedup). GUI never duplicates agent internals.
+            agent_path = self._find_cli_agent_binary()
+            if agent_path:
                 self._run_agent_loop(url, agent_path)
             else:
-                self._log("✗ Agent script not found next to this file")
+                self._log("✗ CLI agent binary not found next to this GUI")
         
         threading.Thread(target=_do_connect, daemon=True).start()
     
@@ -281,10 +299,11 @@ class JenixAgentGUI:
         while self.running:
             try:
                 proc = subprocess.Popen(
-                    [sys.executable, agent_path, "--server", url],
+                    [agent_path],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
-                    text=True
+                    text=True,
+                    env={**os.environ, "JENIX_SERVER": url},
                 )
                 for line in proc.stdout:
                     line = line.strip()

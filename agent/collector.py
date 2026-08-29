@@ -1,4 +1,5 @@
-import psutil, socket, platform, time
+import psutil, socket, platform, time, os
+from urllib.parse import urlparse
 
 _prev_net  = None
 _prev_disk = None
@@ -13,9 +14,37 @@ def get_system_info() -> dict:
     }
 
 def _get_ip() -> str:
+    """Deterministic IP selection: pick the local address the OS would
+    actually use to route to the configured JENIX server, instead of
+    routing to 8.8.8.8. On multi-homed hosts (e.g. this dev VM's NAT +
+    Bridged adapters), routing to an arbitrary public IP can pick a
+    different local interface across restarts/DHCP renewals, causing
+    the same physical machine to report different self-IDed IPs and
+    register as duplicate rows server-side. Routing specifically to the
+    server's own host is stable for a given agent-server pairing."""
+    server_url = os.getenv("JENIX_SERVER", "")
+    if not server_url:
+        server_file = None
+        try:
+            from pathlib import Path
+            server_file = Path.home() / ".jenix" / "server_url"
+            if server_file.exists():
+                server_url = server_file.read_text().strip()
+        except Exception:
+            pass
+    target_host = "8.8.8.8"
+    target_port = 80
+    if server_url:
+        try:
+            parsed = urlparse(server_url)
+            if parsed.hostname:
+                target_host = parsed.hostname
+                target_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        except Exception:
+            pass
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
+        s.connect((target_host, target_port))
         return s.getsockname()[0]
     except Exception:
         return "127.0.0.1"
