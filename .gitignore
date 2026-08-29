@@ -55,3 +55,6 @@ agent/build/
 agent/dist/
 releases/
 server/static/static/js/
+master/topology_private.key
+master/cookies.txt
+master/nohup.out
