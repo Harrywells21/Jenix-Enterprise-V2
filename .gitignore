@@ -39,10 +39,6 @@ test_keys/
 server_venv/
 
 # Backup files from patching sessions
-*.bak
-*.bak2
-*.bak3
-*.bak4
 
 # Old DB schema archive
 *.OLD_SCHEMA_ARCHIVE*
@@ -50,3 +46,12 @@ agent/_fleet_key_baked.py
 
 # Generated report PDFs — test/runtime artifacts, not source
 server/reports/*.pdf
+master/floors_secrets.json
+master/admin_auth.json
+*.bak*
+agent/_topology_key_baked.py
+agent/_topology_floors_baked.py
+agent/build/
+agent/dist/
+releases/
+server/static/static/js/
