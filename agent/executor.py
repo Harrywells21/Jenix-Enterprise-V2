@@ -1,4 +1,4 @@
-import subprocess, threading, shutil, json, os, time
+import subprocess, threading, shutil, json, os, time, platform
 from pathlib import Path
 import snapshot as snap
 from snapshot import sudo_available
@@ -21,24 +21,72 @@ def _detect_pkg_manager():
         return "Windows"
     return "unrecognized"
 
-COMMAND_MAP = {
-    "scan":  "echo '[SCAN] Starting system scan...' && "
-             "df -h && echo '---' && free -h && echo '---' && "
-             "ss -tulnp 2>/dev/null | head -20 && echo '[SCAN] Done.'",
-    "boost": "echo '[BOOST] Applying performance boost...' && "
-             "sudo -n /usr/local/sbin/jenix-sysctl-restore vm.swappiness 10 && "
-             "sudo -n /usr/local/sbin/jenix-sysctl-restore net.core.rmem_max 16777216 && "
-             "echo '[BOOST] Done.'",
-    "clean": "echo '[CLEAN] Cleaning system...' && "
-             "sudo -n apt-get autoremove -y && "
-             "sudo -n apt-get autoclean -y && "
-             "sudo -n journalctl --vacuum-time=7d && "
-             "echo '[CLEAN] Done.'",
-    "fix":   "echo '[FIX] Running fixes...' && "
-             "sudo -n apt-get install -f -y && "
-             "sudo -n dpkg --configure -a && "
-             "echo '[FIX] Done.'",
+_OS = platform.system()  # "Linux", "Darwin", "Windows"
+
+# Per-OS command table for scan/boost/clean/fix. Every command below is
+# real and source-verified (see JENIX Master Context v66), not guessed.
+# macOS 'fix' is intentionally verify-only: Apple removed repair_packages
+# (the old live-repair tool) in Sierra when System Integrity Protection
+# shipped, and no replacement exists on any modern macOS -- the output
+# text discloses this honestly instead of implying false parity.
+#
+# NOTE (as of this patch): macOS boost's jenix-sysctl-restore-macos helper
+# is NOT YET provisioned by install_jenix.sh -- that step is pending,
+# blocked on confirming for real whether `purge` needs sudo on the target
+# macOS version. Until that helper exists on a given machine, boost's
+# later two sudo -n calls will just fail harmlessly (nonzero exit,
+# reported in output, no crash) and only `purge` will actually run there.
+COMMAND_MAP_BY_OS = {
+    "Linux": {
+        "scan":  "echo '[SCAN] Starting system scan...' && "
+                 "df -h && echo '---' && free -h && echo '---' && "
+                 "ss -tulnp 2>/dev/null | head -20 && echo '[SCAN] Done.'",
+        "boost": "echo '[BOOST] Applying performance boost...' && "
+                 "sudo -n /usr/local/sbin/jenix-sysctl-restore vm.swappiness 10 && "
+                 "sudo -n /usr/local/sbin/jenix-sysctl-restore net.core.rmem_max 16777216 && "
+                 "echo '[BOOST] Done.'",
+        "clean": "echo '[CLEAN] Cleaning system...' && "
+                 "sudo -n apt-get autoremove -y && "
+                 "sudo -n apt-get autoclean -y && "
+                 "sudo -n journalctl --vacuum-time=7d && "
+                 "echo '[CLEAN] Done.'",
+        "fix":   "echo '[FIX] Running fixes...' && "
+                 "sudo -n apt-get install -f -y && "
+                 "sudo -n dpkg --configure -a && "
+                 "echo '[FIX] Done.'",
+    },
+    "Darwin": {
+        "scan":  "echo '[SCAN] Starting system scan...' && "
+                 "df -h && echo '---' && vm_stat && echo '---' && "
+                 "lsof -iTCP -sTCP:LISTEN -n -P 2>/dev/null | head -20 && echo '[SCAN] Done.'",
+        "boost": "echo '[BOOST] Applying performance boost...' && "
+                 "sudo -n purge && "
+                 "sudo -n /usr/local/sbin/jenix-sysctl-restore-macos kern.ipc.maxsockbuf 8388608 && "
+                 "sudo -n /usr/local/sbin/jenix-sysctl-restore-macos net.inet.tcp.sendspace 131072 && "
+                 "sudo -n /usr/local/sbin/jenix-sysctl-restore-macos net.inet.tcp.recvspace 131072 && "
+                 "echo '[BOOST] Done.'",
+        "clean": "echo '[CLEAN] Cleaning system...' && "
+                 "sudo -n periodic daily weekly monthly && "
+                 "echo '[CLEAN] Done.'",
+        "fix":   "echo '[FIX] macOS blocks live repair of protected system files since System "
+                 "Integrity Protection (Apple removed repair_packages in Sierra, no replacement exists). "
+                 "Running verify-only check instead...' && "
+                 "diskutil verifyVolume / && "
+                 "echo '[FIX] Verify complete. For a full repair, boot into Recovery Mode and run "
+                 "Disk Utility First Aid.'",
+    },
+    "Windows": {
+        "scan":  'powershell -NoProfile -Command "Get-Volume; '
+                 'Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize; '
+                 'netstat -ano | findstr LISTENING"',
+        "boost": 'powershell -NoProfile -Command "powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c; '
+                 'netsh interface tcp set global autotuninglevel=normal"',
+        "clean": "DISM /Online /Cleanup-Image /StartComponentCleanup",
+        "fix":   'powershell -NoProfile -Command "sfc /scannow; DISM /Online /Cleanup-Image /RestoreHealth"',
+    },
 }
+
+COMMAND_MAP = COMMAND_MAP_BY_OS.get(_OS, {})
 
 SNAPSHOT_BEFORE = {"boost", "clean", "fix"}
 
@@ -322,11 +370,11 @@ def execute_command(cmd_type: str, cmd_id: int, send_fn, params: dict | None = N
                  "output": f"Unknown command: {cmd_type}\n", "status": "failed"})
         return
 
-    if cmd_type in ("clean", "fix") and shutil.which("apt-get") is None:
+    if _OS == "Linux" and cmd_type in ("clean", "fix") and shutil.which("apt-get") is None:
         detected = _detect_pkg_manager()
         send_fn({"type": "cmd_output", "cmd_id": cmd_id,
-                 "output": f"[JENIX] '{cmd_type}' is currently supported on Debian/Ubuntu (apt-based) systems only. "
-                           f"Detected on this machine: {detected}. No changes were made to this system.\n",
+                 "output": f"[JENIX] '{cmd_type}' is currently supported on Debian/Ubuntu (apt-based) Linux "
+                           f"systems only. Detected on this machine: {detected}. No changes were made to this system.\n",
                  "status": "failed"})
         return
 

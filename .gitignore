@@ -61,3 +61,4 @@ master/nohup.out
 master/floors_secrets.key
 master/floors_secrets.json.bak_*
 server/reports/*.csv
+*.bak_*

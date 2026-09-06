@@ -5,12 +5,24 @@ _prev_net  = None
 _prev_disk = None
 _prev_ts   = None
 
+def _get_os_type() -> str:
+    """Normalized OS identifier for display/registration. platform.system()
+    returns 'Linux', 'Darwin', or 'Windows' -- Darwin is mapped to 'macOS'
+    to match what humans (and this codebase's binary_map/scan-command
+    tables) call it. Previously this key was never set anywhere, so
+    agent.py's info.get("os_type", "Linux") silently defaulted every
+    machine -- including real macOS/Windows machines -- to "Linux" in
+    the WS register message."""
+    system = platform.system()
+    return "macOS" if system == "Darwin" else system
+
 def get_system_info() -> dict:
     return {
         "hostname": socket.gethostname(),
         "ip":       _get_ip(),
         "os_name":  f"{platform.system()} {platform.release()}",
         "kernel":   platform.version()[:60],
+        "os_type":  _get_os_type(),
     }
 
 def _get_ip() -> str:
@@ -62,9 +74,11 @@ def collect_metrics() -> dict:
     # RAM
     ram = psutil.virtual_memory().percent
 
-    # Disk usage (root partition)
+    # Disk usage: root partition on Linux/macOS; system drive on Windows
+    # (Windows has no single "/" root -- psutil.disk_usage("/") raises there)
     try:
-        disk = psutil.disk_usage("/").percent
+        disk_path = (os.environ.get("SystemDrive", "C:") + "\\") if platform.system() == "Windows" else "/"
+        disk = psutil.disk_usage(disk_path).percent
     except Exception:
         disk = 0.0
 

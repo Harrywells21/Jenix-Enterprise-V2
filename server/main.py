@@ -136,8 +136,9 @@ def agent_binary(os_name: str):
     from fastapi.responses import FileResponse
     from fastapi import HTTPException
     binary_map = {
-        "linux": "JenixAgent-linux",
-        "macos": "JenixAgent-macos",
+        "linux":   "JenixAgent-linux",
+        "macos":   "JenixAgent-macos",
+        "windows": "JenixAgent-windows.exe",
     }
     filename = binary_map.get(os_name)
     if not filename:
