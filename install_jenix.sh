@@ -75,6 +75,102 @@ linux)
     chmod +x ~/.jenix/JenixAgent
     echo "$JENIX_SERVER" > ~/.jenix/server_url
 
+    echo "[4.5/5] Setting up scoped fleet-command helpers (boost/clean/fix)..."
+    if command -v apt-get &>/dev/null; then
+        sudo tee /usr/local/sbin/jenix-sysctl-restore > /dev/null << 'SYSCTLEOF'
+#!/bin/bash
+# JENIX scoped sysctl wrapper -- used by both boost and rollback.
+# Usage: jenix-sysctl-restore <key> <value>
+set -euo pipefail
+
+ALLOWED_KEYS="vm.swappiness net.core.rmem_max"
+key="${1:-}"
+val="${2:-}"
+
+if [ -z "$key" ] || [ -z "$val" ]; then
+    echo "usage: jenix-sysctl-restore <key> <value>" >&2
+    exit 2
+fi
+
+match=0
+for k in $ALLOWED_KEYS; do
+    [ "$k" = "$key" ] && match=1 && break
+done
+if [ "$match" -ne 1 ]; then
+    echo "jenix-sysctl-restore: key not allowed: $key" >&2
+    exit 3
+fi
+
+if ! [[ "$val" =~ ^[0-9]{1,10}$ ]]; then
+    echo "jenix-sysctl-restore: value must be a plain non-negative integer: $val" >&2
+    exit 4
+fi
+
+case "$key" in
+    vm.swappiness)
+        if [ "$val" -gt 100 ]; then
+            echo "jenix-sysctl-restore: vm.swappiness out of bounds (0-100): $val" >&2
+            exit 5
+        fi
+        ;;
+    net.core.rmem_max)
+        if [ "$val" -gt 1073741824 ]; then
+            echo "jenix-sysctl-restore: net.core.rmem_max out of bounds (0-1GB): $val" >&2
+            exit 5
+        fi
+        ;;
+esac
+
+exec /usr/sbin/sysctl -w "${key}=${val}"
+SYSCTLEOF
+        sudo chmod 755 /usr/local/sbin/jenix-sysctl-restore
+        sudo chown root:root /usr/local/sbin/jenix-sysctl-restore
+
+        sudo tee /usr/local/sbin/jenix-apt-reinstall > /dev/null << 'APTEOF'
+#!/bin/bash
+# JENIX scoped apt-get install wrapper -- used by rollback's package-reinstall step.
+# Usage: jenix-apt-reinstall <pkg1> [pkg2 ...]
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+    echo "usage: jenix-apt-reinstall <pkg> [pkg...]" >&2
+    exit 2
+fi
+if [ "$#" -gt 50 ]; then
+    echo "jenix-apt-reinstall: too many packages in one call (max 50): $#" >&2
+    exit 6
+fi
+
+PKG_RE='^[a-z0-9][a-z0-9.+-]*$'
+for pkg in "$@"; do
+    if ! [[ "$pkg" =~ $PKG_RE ]]; then
+        echo "jenix-apt-reinstall: rejected invalid package name: $pkg" >&2
+        exit 3
+    fi
+done
+
+exec /usr/bin/apt-get install -y "$@"
+APTEOF
+        sudo chmod 755 /usr/local/sbin/jenix-apt-reinstall
+        sudo chown root:root /usr/local/sbin/jenix-apt-reinstall
+
+        sudo tee /etc/sudoers.d/jenix-agent > /dev/null << SUDOEOF
+$(whoami) ALL=(ALL) NOPASSWD: /usr/bin/apt-get autoremove -y
+$(whoami) ALL=(ALL) NOPASSWD: /usr/bin/apt-get autoclean -y
+$(whoami) ALL=(ALL) NOPASSWD: /usr/bin/journalctl --vacuum-time=7d
+$(whoami) ALL=(ALL) NOPASSWD: /usr/bin/apt-get install -f -y
+$(whoami) ALL=(ALL) NOPASSWD: /usr/bin/dpkg --configure -a
+$(whoami) ALL=(ALL) NOPASSWD: /usr/local/sbin/jenix-sysctl-restore *
+$(whoami) ALL=(ALL) NOPASSWD: /usr/local/sbin/jenix-apt-reinstall *
+SUDOEOF
+        sudo chmod 440 /etc/sudoers.d/jenix-agent
+        sudo visudo -c -f /etc/sudoers.d/jenix-agent && echo "      sudoers syntax OK" || echo "      WARNING: sudoers syntax check failed, review before trusting this file"
+        echo "      Scoped fleet-command helpers installed (boost/clean/fix now supported)"
+    else
+        echo "      No apt-get detected -- scoped helpers are Debian/Ubuntu-specific, skipping."
+        echo "      boost/clean/fix will report 'not supported on this system' rather than failing silently."
+    fi
+
     echo "[5/5] Setting up auto-start..."
     # Create desktop shortcut
     mkdir -p ~/Desktop
