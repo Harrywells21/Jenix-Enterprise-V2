@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import api, { getMachines, getAuditLogs } from "../api";
+import api, { getMachines, getAuditLogs, getComplianceScore } from "../api";
 
 const MONO = "'JetBrains Mono', monospace";
 const FONT = "'Cabinet Grotesk', sans-serif";
@@ -31,6 +31,7 @@ export default function Reports() {
   const [toast,     setToast]     = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
   const [fleetStats, setFleetStats] = useState(null);
+  const [complianceScore, setComplianceScore] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [generatingFleet, setGeneratingFleet] = useState(false);
 
@@ -50,9 +51,11 @@ export default function Reports() {
     Promise.all([
       api.get("/api/analytics/fleet"),
       api.get("/api/analytics/savings"),
-    ]).then(([fleetRes, savingsRes]) => {
+      getComplianceScore(),
+    ]).then(([fleetRes, savingsRes, complianceRes]) => {
       const f = fleetRes.data;
       const s = savingsRes.data;
+      setComplianceScore(complianceRes.data);
       setFleetStats({
         online_nodes: f.online,
         total_nodes: f.total,
@@ -246,17 +249,31 @@ export default function Reports() {
         </div>
       </div>
 
-      {/* Compliance readiness */}
+      {/* Compliance readiness - real posture score, illustrative framework mapping */}
       <div style={{ background: "#0c1220", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "14px", padding: "20px" }}>
-        <div style={{ fontSize: "11px", color: "rgba(122,143,166,0.4)", fontFamily: MONO, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "16px" }}>
-          Compliance Readiness Score
+        <div style={{ fontSize: "11px", color: "rgba(122,143,166,0.4)", fontFamily: MONO, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "4px" }}>
+          Security Posture Score
+        </div>
+        {complianceScore && (
+          <div style={{ display: "flex", alignItems: "baseline", gap: "10px", marginBottom: "6px" }}>
+            <span style={{ fontFamily: MONO, fontSize: "28px", fontWeight: 700, color: complianceScore.color }}>
+              {complianceScore.score}
+            </span>
+            <span style={{ fontSize: "13px", color: complianceScore.color, fontWeight: 600 }}>
+              {complianceScore.grade}
+            </span>
+          </div>
+        )}
+        <div style={{ fontSize: "10px", color: "rgba(122,143,166,0.5)", marginBottom: "14px", fontStyle: "italic" }}>
+          Computed from real CVE findings, unresolved alerts, audit-log integrity, and fleet availability.
+          Framework cards below are an illustrative mapping, not a certified audit against these standards.
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "12px" }}>
           {[
-            { name: "SOC 2 Type II",   score: 87, color: "#38bdf8" },
-            { name: "CIS Level 2",     score: 91, color: "#10b981" },
-            { name: "HIPAA",           score: 78, color: "#f59e0b" },
-            { name: "ISO 27001",       score: 82, color: "#8b5cf6" },
+            { name: "SOC 2 Type II",   score: complianceScore ? complianceScore.score : 0, color: "#38bdf8" },
+            { name: "CIS Level 2",     score: complianceScore ? complianceScore.score : 0, color: "#10b981" },
+            { name: "HIPAA",           score: complianceScore ? complianceScore.score : 0, color: "#f59e0b" },
+            { name: "ISO 27001",       score: complianceScore ? complianceScore.score : 0, color: "#8b5cf6" },
           ].map(({ name, score, color }) => (
             <div key={name} style={{ padding: "14px 16px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)", borderRadius: "10px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>

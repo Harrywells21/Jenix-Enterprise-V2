@@ -75,6 +75,7 @@ export const getMachineScore  = (id) => api.get(`/api/analytics/machine/${id}/sc
 export const getAllAlerts     = ()   => api.get("/api/analytics/alerts/all");
 export const markAllRead      = ()   => api.post("/api/analytics/alerts/mark-all-read");
 export const getSavings       = ()   => api.get("/api/analytics/savings");
+export const getComplianceScore = () => api.get("/api/analytics/fleet/compliance-score");
 
 // Fleet commands
 export const fleetCommand = (type, machine_ids = []) =>

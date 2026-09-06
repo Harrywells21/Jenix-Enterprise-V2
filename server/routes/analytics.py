@@ -3,9 +3,9 @@ JENIX Fleet Analytics — powers the executive dashboard.
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from db import get_db, Machine, Metric, Alert, Command, AuditLog
+from db import get_db, Machine, Metric, Alert, Command, AuditLog, CveScan, CveFinding, compute_audit_hash
 from auth import get_current_user, User
-from health_score import calculate_health_score
+from health_score import calculate_health_score, calculate_compliance_score, SEV_ORDER
 from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -109,6 +109,55 @@ def fleet_overview(db: Session = Depends(get_db),
         "machine_scores":  machine_scores,
         "activity":        activity,
     }
+
+@router.get("/fleet/compliance-score")
+def fleet_compliance_score(db: Session = Depends(get_db),
+                            _:  User    = Depends(get_current_user)):
+    machines = db.query(Machine).all()
+    total_machines = len(machines)
+    offline_machines = sum(1 for m in machines if m.status == "offline")
+
+    scanned_machine_ids = {s.machine_id for s in db.query(CveScan.machine_id).distinct()}
+    unscanned_machines = total_machines - len(scanned_machine_ids)
+
+    latest_scan_ids = []
+    for mid in scanned_machine_ids:
+        latest = db.query(CveScan).filter(CveScan.machine_id == mid)\
+                    .order_by(CveScan.scanned_at.desc()).first()
+        if latest:
+            latest_scan_ids.append(latest.id)
+    findings = db.query(CveFinding).filter(CveFinding.scan_id.in_(latest_scan_ids)).all() if latest_scan_ids else []
+    cve_severity_counts = {}
+    for f in findings:
+        cve_severity_counts[f.severity] = cve_severity_counts.get(f.severity, 0) + 1
+
+    unresolved = db.query(Alert).filter(Alert.is_read == False).all()
+    unresolved_alerts = {
+        "critical": sum(1 for a in unresolved if a.level == "critical"),
+        "warning":  sum(1 for a in unresolved if a.level == "warning"),
+    }
+
+    sample_logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(200).all()
+    audit_tamper_detected = False
+    audit_unverifiable_count = 0
+    for log in sample_logs:
+        if log.content_hash is None:
+            audit_unverifiable_count += 1
+            continue
+        computed = compute_audit_hash(log.id, log.machine_id, log.user_id, log.action,
+                                       log.detail, log.status, log.timestamp)
+        if computed != log.content_hash:
+            audit_tamper_detected = True
+
+    result = calculate_compliance_score(
+        cve_severity_counts, unresolved_alerts,
+        audit_tamper_detected, audit_unverifiable_count,
+        total_machines, offline_machines, unscanned_machines,
+    )
+    result["cve_severity_counts"] = cve_severity_counts
+    result["unresolved_alerts"] = unresolved_alerts
+    return result
+
 
 @router.get("/machine/{machine_id}/score")
 def machine_score(machine_id: int,
