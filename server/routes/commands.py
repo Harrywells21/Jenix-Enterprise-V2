@@ -8,9 +8,9 @@ from datetime import datetime
 
 router = APIRouter(prefix="/machines", tags=["commands"])
 
-ALLOWED = {"scan", "boost", "clean", "fix", "rollback", "exec", "reassign_server"}
+ALLOWED = {"scan", "boost", "clean", "fix", "rollback", "exec", "reassign_server", "apply_upgrade", "checkpoint_start", "checkpoint_restore", "checkpoint_discard", "checkpoint_list"}
 GATED   = {"boost", "clean", "fix", "rollback"}  # require node action passphrase, if one is set
-SIGNED  = {"exec", "reassign_server"}  # require a valid master-key signature instead of a node passphrase
+SIGNED = {"exec", "reassign_server", "apply_upgrade", "checkpoint_start", "checkpoint_restore", "checkpoint_discard", "checkpoint_list"}  # require a valid master-key signature instead of a node passphrase
 
 class CommandRequest(BaseModel):
     type: str
@@ -50,6 +50,28 @@ async def run_command(machine_id: int,
                                        "This server does not verify the signature itself — "
                                        "the agent independently verifies it against the buyer's topology public "
                                        "key and only accepts a target URL from its baked-in trusted floor list.")
+    if body.type == "apply_upgrade":
+        if not body.params.get("version") or not body.params.get("download_url") \
+           or not body.params.get("sha256") or not body.signature:
+            raise HTTPException(status_code=400,
+                                detail="'apply_upgrade' requires params.version, params.download_url, "
+                                       "params.sha256, and 'signature'. This server does not verify the "
+                                       "signature itself — the agent independently verifies it against "
+                                       "the buyer's topology public key before downloading anything.")
+    if body.type in ("checkpoint_start", "checkpoint_list"):
+        if not body.signature:
+                raise HTTPException(status_code=400,
+                        detail="'checkpoint_start' requires 'signature'. This server "
+                        "does not verify the signature itself — the agent independently "
+                        "verifies it against the buyer's topology public key before "
+                        "creating any checkpoint.")
+    if body.type in ("checkpoint_restore", "checkpoint_discard"):
+        if not body.params.get("checkpoint_id") or not body.signature:
+                raise HTTPException(status_code=400,
+                        detail=f"'{body.type}' requires params.checkpoint_id and "
+                        "'signature'. This server does not verify the signature itself "
+                        "— the agent independently verifies it against the buyer's "
+                        "topology public key before restoring or discarding anything.")
     m = db.query(Machine).filter(Machine.id == machine_id).first()
     if not m:
         raise HTTPException(status_code=404, detail="Machine not found")
@@ -87,6 +109,13 @@ async def run_command(machine_id: int,
         db.commit()
         raise HTTPException(status_code=503, detail="Agent not connected")
     cmd.status = "running"
+    if body.type == "reassign_server":
+        # Soft-mark: distinguishes a deliberate reassignment-in-progress from
+        # a real disconnect. If the agent's own signature/trust-list check
+        # fails and it never actually leaves, its next reconnect unconditionally
+        # resets status to "online" anyway (see ws/handler.py agent_endpoint),
+        # so this self-heals rather than getting permanently stuck.
+        m.status = "reassigning"
     db.commit()
     return {"ok": True, "cmd_id": cmd.id}
 

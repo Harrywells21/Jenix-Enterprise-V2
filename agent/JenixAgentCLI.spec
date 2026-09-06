@@ -3,7 +3,7 @@ a = Analysis(
     ['agent.py'],
     pathex=[],
     binaries=[],
-    datas=[('collector.py', '.'), ('executor.py', '.'), ('fleet_auth.py', '.'), ('snapshot.py', '.'), ('_fleet_key_baked.py', '.'), ('topology_auth.py', '.'), ('_topology_key_baked.py', '.'), ('_topology_floors_baked.py', '.')],
+    datas=[('collector.py', '.'), ('executor.py', '.'), ('fleet_auth.py', '.'), ('snapshot.py', '.'), ('checkpoint.py', '.'), ('_fleet_key_baked.py', '.'), ('topology_auth.py', '.'), ('_topology_key_baked.py', '.'), ('_topology_floors_baked.py', '.')],
     hiddenimports=['websockets', 'psutil', 'cryptography', 'cryptography.hazmat.primitives.asymmetric.ed25519', 'cryptography.exceptions'],
     hookspath=[],
     hooksconfig={},

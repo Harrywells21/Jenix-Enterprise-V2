@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from db import get_db, User
-from auth import (authenticate_user, create_token, hash_password,
+from auth import (authenticate_user, create_token, create_ws_token, hash_password,
                   verify_password, get_current_user, require_admin, oauth2)
 from security import blacklist_token, is_token_blacklisted, rate_limit_login
 
@@ -53,6 +53,14 @@ def logout(token: str = Depends(oauth2)):
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)):
     return current_user
+
+@router.post("/ws-token")
+def issue_ws_token(current_user: User = Depends(get_current_user)):
+    """Short-lived (45s) token for authenticating a dashboard WebSocket
+    connection, which can't send an Authorization header. Requires a
+    valid regular login token to obtain -- get_current_user already
+    handles the blacklist check and active-user check."""
+    return {"ws_token": create_ws_token(current_user.id)}
 
 @router.post("/change-password")
 def change_password(body: ChangePasswordRequest,

@@ -4,6 +4,7 @@ import snapshot as snap
 from snapshot import sudo_available
 import fleet_auth
 import topology_auth
+import checkpoint as cp
 
 def _detect_pkg_manager():
     if shutil.which("apt-get"):
@@ -121,6 +122,72 @@ def execute_command(cmd_type: str, cmd_id: int, send_fn, params: dict | None = N
         threading.Thread(target=_run_reassign, daemon=True).start()
         return
 
+    if cmd_type == "apply_upgrade":
+        def _run_upgrade():
+            import hashlib, tempfile, sys as _sys, stat, urllib.request
+
+            version      = params.get("version")
+            download_url = params.get("download_url")
+            sha256       = params.get("sha256")
+            signature    = params.get("signature")
+            if not all([version, download_url, sha256, signature]):
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": "[UPGRADE] Missing version/download_url/sha256/signature — rejected\n",
+                         "status": "failed"})
+                return
+            payload = json.dumps({"type": "apply_upgrade", "version": version,
+                                   "download_url": download_url, "sha256": sha256},
+                                  sort_keys=True, separators=(",", ":")).encode()
+            if not topology_auth.verify_signature(payload, signature):
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": "[UPGRADE] Signature verification failed — this command was not "
+                                   "authenticated with the fleet topology key. Rejected, nothing downloaded.\n",
+                         "status": "failed"})
+                return
+
+            send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                     "output": f"[UPGRADE] Verified. Downloading {version} from {download_url}...\n",
+                     "status": "running"})
+            try:
+                current_bin = Path(_sys.argv[0]).resolve()
+                tmp_fd, tmp_path_str = tempfile.mkstemp(dir=str(current_bin.parent), prefix=".jenix_upgrade_")
+                tmp_path = Path(tmp_path_str)
+                with urllib.request.urlopen(download_url, timeout=60) as resp, open(tmp_fd, "wb") as out:
+                    shutil.copyfileobj(resp, out)
+
+                digest = hashlib.sha256(tmp_path.read_bytes()).hexdigest()
+                if digest != sha256:
+                    tmp_path.unlink(missing_ok=True)
+                    send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                             "output": f"[UPGRADE] SHA-256 mismatch (expected {sha256}, got {digest}) — "
+                                       f"deleted download, nothing replaced.\n",
+                             "status": "failed"})
+                    return
+
+                tmp_path.chmod(current_bin.stat().st_mode | stat.S_IEXEC)
+                backup_bin = current_bin.with_suffix(current_bin.suffix + ".bak_preupgrade")
+                shutil.copy2(current_bin, backup_bin)
+                tmp_path.replace(current_bin)
+
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": f"[UPGRADE] Verified and installed {version}. Relaunching...\n",
+                         "status": "running"})
+
+                env = os.environ.copy()
+                subprocess.Popen([str(current_bin)], env=env,
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL, start_new_session=True)
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": f"[UPGRADE] New process launched on {version}. This process is exiting now.\n",
+                         "status": "done"})
+                time.sleep(1.0)
+                os._exit(0)
+            except Exception as e:
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": f"[UPGRADE] Failed: {e}\n", "status": "failed"})
+        threading.Thread(target=_run_upgrade, daemon=True).start()
+        return
+
     if cmd_type == "rollback":
         def _run_rollback():
             snap_id = params.get("snapshot_id") or snap.latest_snapshot_id()
@@ -136,6 +203,117 @@ def execute_command(cmd_type: str, cmd_id: int, send_fn, params: dict | None = N
                      "output": f"[ROLLBACK] {'Completed' if ok else 'Failed'}\n",
                      "status": "done" if ok else "failed"})
         threading.Thread(target=_run_rollback, daemon=True).start()
+        return
+
+    if cmd_type == "checkpoint_start":
+        def _run_checkpoint_start():
+            paths = params.get("paths") or []
+            signature = params.get("signature")
+            if not signature:
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": "[CHECKPOINT] Missing signature — rejected\n", "status": "failed"})
+                return
+            payload = json.dumps({"type": "checkpoint_start", "paths": sorted(paths)},
+                                  sort_keys=True, separators=(",", ":")).encode()
+            if not topology_auth.verify_signature(payload, signature):
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": "[CHECKPOINT] Signature verification failed — this command was not "
+                                   "authenticated with the fleet topology key. Rejected, nothing snapshotted.\n",
+                         "status": "failed"})
+                return
+            send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                     "output": "[CHECKPOINT] Verified. Creating checkpoint...\n", "status": "running"})
+            try:
+                meta = cp.create_checkpoint(extra_paths=paths)
+                send_fn({"type": "checkpoint_status", "cmd_id": cmd_id,
+                         "checkpoint_id": meta["id"], "status": "armed",
+                         "paths": meta["paths"]})
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": f"[CHECKPOINT] Armed. id={meta['id']}, paths: {', '.join(meta['paths'])}\n",
+                         "status": "done"})
+            except Exception as e:
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": f"[CHECKPOINT] Failed: {e}\n", "status": "failed"})
+        threading.Thread(target=_run_checkpoint_start, daemon=True).start()
+        return
+
+    if cmd_type == "checkpoint_restore":
+        def _run_checkpoint_restore():
+            checkpoint_id = params.get("checkpoint_id")
+            signature = params.get("signature")
+            if not checkpoint_id or not signature:
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": "[CHECKPOINT] Missing checkpoint_id or signature — rejected\n", "status": "failed"})
+                return
+            payload = json.dumps({"type": "checkpoint_restore", "checkpoint_id": checkpoint_id},
+                                  sort_keys=True, separators=(",", ":")).encode()
+            if not topology_auth.verify_signature(payload, signature):
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": "[CHECKPOINT] Signature verification failed — rejected, nothing restored.\n",
+                         "status": "failed"})
+                return
+            send_fn({"type": "checkpoint_status", "cmd_id": cmd_id,
+                     "checkpoint_id": checkpoint_id, "status": "restoring"})
+            def _log(msg):
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id, "output": msg, "status": "running"})
+            ok = cp.restore_checkpoint(checkpoint_id, _log)
+            send_fn({"type": "checkpoint_status", "cmd_id": cmd_id,
+                     "checkpoint_id": checkpoint_id, "status": "none" if ok else "armed"})
+            send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                     "output": f"[CHECKPOINT] {'Restore completed' if ok else 'Restore failed'}\n",
+                     "status": "done" if ok else "failed"})
+        threading.Thread(target=_run_checkpoint_restore, daemon=True).start()
+        return
+
+    if cmd_type == "checkpoint_discard":
+        def _run_checkpoint_discard():
+            checkpoint_id = params.get("checkpoint_id")
+            signature = params.get("signature")
+            if not checkpoint_id or not signature:
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": "[CHECKPOINT] Missing checkpoint_id or signature — rejected\n", "status": "failed"})
+                return
+            payload = json.dumps({"type": "checkpoint_discard", "checkpoint_id": checkpoint_id},
+                                  sort_keys=True, separators=(",", ":")).encode()
+            if not topology_auth.verify_signature(payload, signature):
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": "[CHECKPOINT] Signature verification failed — rejected, nothing changed.\n",
+                         "status": "failed"})
+                return
+            def _log(msg):
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id, "output": msg, "status": "running"})
+            ok = cp.discard_checkpoint(checkpoint_id, _log)
+            send_fn({"type": "checkpoint_status", "cmd_id": cmd_id,
+                     "checkpoint_id": checkpoint_id, "status": "none" if ok else "armed"})
+            send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                     "output": f"[CHECKPOINT] {'Discarded' if ok else 'Discard failed'}\n",
+                     "status": "done" if ok else "failed"})
+        threading.Thread(target=_run_checkpoint_discard, daemon=True).start()
+        return
+
+    if cmd_type == "checkpoint_list":
+        def _run_checkpoint_list():
+            signature = params.get("signature")
+            if not signature:
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": "[CHECKPOINT] Missing signature -- rejected\n", "status": "failed"})
+                return
+            payload = json.dumps({"type": "checkpoint_list"},
+                                  sort_keys=True, separators=(",", ":")).encode()
+            if not topology_auth.verify_signature(payload, signature):
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": "[CHECKPOINT] Signature verification failed -- this command was not "
+                                   "authenticated with the fleet topology key. Rejected.\n",
+                         "status": "failed"})
+                return
+            try:
+                items = cp.list_checkpoints()
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": json.dumps(items), "status": "done"})
+            except Exception as e:
+                send_fn({"type": "cmd_output", "cmd_id": cmd_id,
+                         "output": f"[CHECKPOINT] Failed: {e}\n", "status": "failed"})
+        threading.Thread(target=_run_checkpoint_list, daemon=True).start()
         return
 
     shell_cmd = COMMAND_MAP.get(cmd_type)

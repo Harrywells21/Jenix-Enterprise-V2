@@ -11,9 +11,9 @@ from datetime import datetime
 
 router = APIRouter(prefix="/fleet", tags=["fleet"])
 
-ALLOWED = {"scan", "boost", "clean", "fix", "rollback", "exec"}
+ALLOWED = {"scan", "boost", "clean", "fix", "rollback", "exec", "checkpoint_start"}
 GATED   = {"boost", "clean", "fix", "rollback"}  # require node action passphrase, if one is set
-SIGNED  = {"exec"}  # require a valid master-key signature instead of a node passphrase
+SIGNED  = {"exec", "checkpoint_start"}  # require a valid master-key signature instead of a node passphrase
 
 class FleetCommand(BaseModel):
     type:       str
@@ -31,11 +31,14 @@ async def fleet_command(body: FleetCommand,
         raise HTTPException(status_code=400, detail=f"Unknown command")
 
     if body.type in SIGNED:
-        if not body.script or not body.signature:
+        if not body.signature:
             raise HTTPException(status_code=400,
-                                detail="'exec' requires both 'script' and 'signature'. "
+                                detail=f"'{body.type}' requires 'signature'. "
                                        "This server does not verify the signature itself — "
                                        "each agent independently verifies it against the buyer's master public key.")
+        if body.type == "exec" and not body.script:
+            raise HTTPException(status_code=400,
+                                detail="'exec' additionally requires 'script'.")
 
     # Get target machines
     if body.machine_ids:

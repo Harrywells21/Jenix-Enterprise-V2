@@ -2,7 +2,7 @@
 # Run in PowerShell as Administrator
 
 $ErrorActionPreference = 'Stop'
-$RELEASES = "https://github.com/Harrywells21/Jenix-Enterprise/releases/download/v1.0.0"
+$RELEASES = "https://github.com/Harrywells21/Jenix-Enterprise-V2/releases/download/v1.0.0"
 $DIR = "$env:LOCALAPPDATA\JenixAgent"
 
 Write-Host ""

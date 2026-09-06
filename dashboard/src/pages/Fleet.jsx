@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { getFleetOverview, getAllAlerts, markAllRead, fleetCommand, getSavings, getPendingMachines, getInstallCommand, approveMachine, rejectMachine } from "../api";
+import { getFleetOverview, getAllAlerts, markAllRead, fleetCommand, getSavings, getPendingMachines, getInstallCommand, approveMachine, rejectMachine, getSites } from "../api";
 
 /* ── Stat Card ── */
 function StatCard({ label, value, sub, accent, icon, delay = 0 }) {
@@ -165,6 +165,9 @@ export default function Fleet() {
   const [pending,   setPending]   = useState([]);
   const [showInstall, setShowInstall] = useState(false);
   const [installCmd,  setInstallCmd]  = useState(null);
+  const [sites,        setSites]        = useState([]);
+  const [installSiteId, setInstallSiteId] = useState("");
+  const [pendingSiteSelections, setPendingSiteSelections] = useState({});
   const navigate = useNavigate();
 
   const showToast = (msg, type = "success") => {
@@ -178,6 +181,7 @@ export default function Fleet() {
       getAllAlerts().then(r => setAlerts(r.data?.alerts || r.data || [])).catch(() => {});
       getSavings().then(r => setSavings(r.data)).catch(() => {});
       getPendingMachines().then(r => setPending(r.data || [])).catch(() => {});
+      getSites().then(r => setSites(r.data || [])).catch(() => {});
     };
     load();
     const iv = setInterval(load, 15_000);
@@ -202,7 +206,7 @@ export default function Fleet() {
 
   const handleApprove = async (id, hostname) => {
     try {
-      await approveMachine(id);
+      await approveMachine(id, pendingSiteSelections[id] || undefined);
       setPending(p => p.filter(m => m.id !== id));
       showToast(`${hostname} approved`, "success");
     } catch (e) {
@@ -220,15 +224,19 @@ export default function Fleet() {
     }
   };
 
-  const handleShowInstall = async () => {
-    if (showInstall) { setShowInstall(false); return; }
+  const fetchInstallCommand = async (siteId) => {
     try {
-      const r = await getInstallCommand();
+      const r = await getInstallCommand(siteId || undefined);
       setInstallCmd(r.data);
-      setShowInstall(true);
     } catch (e) {
       showToast(e.response?.data?.detail || e.message, "error");
     }
+  };
+
+  const handleShowInstall = async () => {
+    if (showInstall) { setShowInstall(false); return; }
+    await fetchInstallCommand(installSiteId);
+    setShowInstall(true);
   };
 
   const stats = [
@@ -400,6 +408,21 @@ export default function Fleet() {
             fontSize: "12px", fontWeight: 700, color: "#8b5cf6",
             fontFamily: "'Syne', sans-serif", marginBottom: "8px",
           }}>Run this on the target machine</div>
+          <select
+            value={installSiteId}
+            onChange={e => { const v = e.target.value; setInstallSiteId(v); fetchInstallCommand(v); }}
+            style={{
+              padding: "6px 10px", marginBottom: "10px",
+              background: "#0c1220", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: "6px", color: "#e8f0fe", fontSize: "12px",
+              fontFamily: "'Cabinet Grotesk', sans-serif",
+            }}
+          >
+            <option value="">No site</option>
+            {sites.map(s => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
           <div style={{
             display: "flex", alignItems: "center", gap: "10px",
             background: "#060812", border: "1px solid rgba(255,255,255,0.08)",
@@ -473,7 +496,22 @@ export default function Fleet() {
                     fontFamily: "'JetBrains Mono', monospace", fontSize: "11px",
                   }}>{m.ip} · {m.os_name}</span>
                 </div>
-                <div style={{ display: "flex", gap: "8px" }}>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <select
+                    value={pendingSiteSelections[m.id] || ""}
+                    onChange={e => setPendingSiteSelections(p => ({ ...p, [m.id]: e.target.value }))}
+                    style={{
+                      padding: "5px 8px", background: "#0c1220",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      borderRadius: "6px", color: "#e8f0fe",
+                      fontSize: "11px", fontFamily: "'Cabinet Grotesk', sans-serif",
+                    }}
+                  >
+                    <option value="">No site</option>
+                    {sites.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
                   <button
                     onClick={() => handleApprove(m.id, m.hostname)}
                     style={{

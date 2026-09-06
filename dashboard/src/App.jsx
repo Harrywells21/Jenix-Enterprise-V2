@@ -14,6 +14,7 @@ import Settings   from "./pages/Settings";
 import AuditPage  from "./pages/AuditPage";
 import CVEScanner from "./pages/CVEScanner";
 import Uptime     from "./pages/Uptime";
+import Sites      from "./pages/Sites";
 import WhiteLabel from "./pages/WhiteLabel";
 import DemoScript from "./pages/DemoScript";
 import Sidebar    from "./components/Sidebar";
@@ -118,6 +119,9 @@ export default function App() {
             }/>
             <Route path="/uptime" element={
               <Protected><Layout><Uptime /></Layout></Protected>
+            }/>
+            <Route path="/sites" element={
+              <Protected><Layout><Sites /></Layout></Protected>
             }/>
             <Route path="/whitelabel" element={
               <Protected><Layout><WhiteLabel /></Layout></Protected>

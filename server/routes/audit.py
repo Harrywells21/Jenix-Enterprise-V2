@@ -5,7 +5,7 @@ Each log entry is hashed with SHA256 to detect tampering.
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from db import get_db, AuditLog, Machine, User
+from db import get_db, AuditLog, Machine, User, compute_audit_hash
 from auth import get_current_user
 from datetime import datetime
 import hashlib, json, io, csv, os, jwt
@@ -13,18 +13,10 @@ import hashlib, json, io, csv, os, jwt
 router = APIRouter(prefix="/audit", tags=["audit"])
 
 def _compute_hash(log_entry: AuditLog) -> str:
-    data = {
-        "id":         log_entry.id,
-        "machine_id": log_entry.machine_id,
-        "user_id":    log_entry.user_id,
-        "action":     log_entry.action,
-        "detail":     log_entry.detail,
-        "status":     log_entry.status,
-        "timestamp":  log_entry.timestamp.isoformat(),
-    }
-    return hashlib.sha256(
-        json.dumps(data, sort_keys=True).encode()
-    ).hexdigest()
+    return compute_audit_hash(
+        log_entry.id, log_entry.machine_id, log_entry.user_id,
+        log_entry.action, log_entry.detail, log_entry.status, log_entry.timestamp,
+    )
 
 @router.get("/logs")
 def get_audit_logs(limit: int = 200,
@@ -62,12 +54,22 @@ def verify_log(log_id: int,
     if not l:
         return {"verified": False, "error": "Log not found"}
     computed = _compute_hash(l)
+    if l.content_hash is None:
+        return {
+            "verified":  None,
+            "log_id":    log_id,
+            "hash":      computed,
+            "timestamp": l.timestamp.isoformat(),
+            "action":    l.action,
+            "error":     "No stored hash on record for this log",
+        }
     return {
-        "verified":  True,
-        "log_id":    log_id,
-        "hash":      computed,
-        "timestamp": l.timestamp.isoformat(),
-        "action":    l.action,
+        "verified":    computed == l.content_hash,
+        "log_id":      log_id,
+        "hash":        computed,
+        "stored_hash": l.content_hash,
+        "timestamp":   l.timestamp.isoformat(),
+        "action":      l.action,
     }
 
 

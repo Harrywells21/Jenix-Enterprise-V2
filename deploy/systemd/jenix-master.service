@@ -1,0 +1,15 @@
+[Unit]
+Description=JENIX Enterprise Master Control Plane
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/aadi/Desktop/jenix/master
+ExecStart=/home/aadi/Desktop/jenix/server_venv/bin/uvicorn master_server:app --host 0.0.0.0 --port 9000
+User=aadi
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

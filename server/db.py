@@ -5,11 +5,17 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 import os
+import hashlib
+import json
+import datetime as dt_module
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./jenix.db")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    f"sqlite:///{os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jenix.db')}"
+)
 
 engine = create_engine(
     DATABASE_URL,
@@ -66,6 +72,16 @@ class Machine(Base):
     token       = Column(String, unique=True, index=True, nullable=False)
     status      = Column(String, default="offline")   # online / offline / warning
     action_passphrase_hash = Column(String, nullable=True)  # gates boost/clean/fix/rollback
+    current_version   = Column(String, nullable=True)   # version string agent last reported
+    available_version = Column(String, nullable=True)   # version staged/approved for this machine, if any
+    upgrade_status     = Column(String, nullable=True)  # None / "pending" / "downloading" / "done" / "failed"
+    checkpoint_status      = Column(String, nullable=True)  # None / "armed" / "restoring"
+    checkpoint_snapshot_id = Column(String, nullable=True)  # id of the checkpoint currently armed on this machine, if any
+    checkpoint_armed_at    = Column(DateTime, nullable=True)
+    redirect_target_url    = Column(String, nullable=True)  # set by approve-with-redirect; agent told to reconnect elsewhere, then this row is deleted
+    site_id     = Column(Integer, nullable=True)  # optional Site grouping, no enforced FK (matches redirect_target_url convention)
+    last_risk_score = Column(Integer, nullable=True)  # risk score (0-100) from the most recent report generation
+    last_risk_at    = Column(DateTime, nullable=True)  # timestamp of that scan, for delta display in next report
     last_seen   = Column(DateTime, default=datetime.utcnow)
     created_at  = Column(DateTime, default=datetime.utcnow)
     metrics     = relationship("Metric",   back_populates="machine", cascade="all, delete")
@@ -75,6 +91,13 @@ class Machine(Base):
     reports     = relationship("Report",   back_populates="machine", cascade="all, delete")
     alerts      = relationship("Alert",    back_populates="machine", cascade="all, delete")
     cve_scans   = relationship("CveScan",  back_populates="machine", cascade="all, delete")
+
+
+class Site(Base):
+    __tablename__ = "sites"
+    id         = Column(Integer, primary_key=True, index=True)
+    name       = Column(String, unique=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Metric(Base):
@@ -122,8 +145,35 @@ class AuditLog(Base):
     detail     = Column(Text, default="")
     status     = Column(String, default="ok")   # ok / warning / critical
     timestamp  = Column(DateTime, default=datetime.utcnow)
+    content_hash = Column(String, nullable=True)  # SHA256, set at insert time via after_insert listener
     machine    = relationship("Machine", back_populates="audit_logs")
     user       = relationship("User",    back_populates="audit_logs")
+
+
+def compute_audit_hash(log_id, machine_id, user_id, action, detail, status, timestamp) -> str:
+    if isinstance(timestamp, str):
+        try:
+            ts = dt_module.datetime.fromisoformat(timestamp.replace(" ", "T", 1)).isoformat()
+        except ValueError:
+            ts = timestamp
+    elif hasattr(timestamp, "isoformat"):
+        ts = timestamp.isoformat()
+    else:
+        ts = str(timestamp)
+    data = {"id": log_id, "machine_id": machine_id, "user_id": user_id,
+            "action": action, "detail": detail, "status": status, "timestamp": ts}
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+
+from sqlalchemy import event as _sa_event
+
+@_sa_event.listens_for(AuditLog, "after_insert")
+def _set_audit_content_hash(mapper, connection, target):
+    h = compute_audit_hash(target.id, target.machine_id, target.user_id,
+                            target.action, target.detail, target.status, target.timestamp)
+    connection.execute(
+        AuditLog.__table__.update().where(AuditLog.__table__.c.id == target.id).values(content_hash=h)
+    )
 
 
 class Schedule(Base):
@@ -226,6 +276,43 @@ def _migrate_schema():
             conn.commit()
             print("✅ Migrated: added machines.action_passphrase_hash")
 
+        for col in ("current_version", "available_version", "upgrade_status"):
+            if col not in cols:
+                conn.exec_driver_sql(f"ALTER TABLE machines ADD COLUMN {col} VARCHAR")
+                conn.commit()
+                print(f"✅ Migrated: added machines.{col}")
+        for col in ("checkpoint_status", "checkpoint_snapshot_id"):
+            if col not in cols:
+                conn.exec_driver_sql(f"ALTER TABLE machines ADD COLUMN {col} VARCHAR")
+                conn.commit()
+                print(f"✅ Migrated: added machines.{col}")
+        if "checkpoint_armed_at" not in cols:
+            conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN checkpoint_armed_at DATETIME")
+            conn.commit()
+            print("✅ Migrated: added machines.checkpoint_armed_at")
+        if "redirect_target_url" not in cols:
+            conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN redirect_target_url VARCHAR")
+            conn.commit()
+            print("✅ Migrated: added machines.redirect_target_url")
+        if "last_risk_score" not in cols:
+            conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN last_risk_score INTEGER")
+            conn.commit()
+            print("✅ Migrated: added machines.last_risk_score")
+        if "last_risk_at" not in cols:
+            conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN last_risk_at DATETIME")
+            conn.commit()
+            print("✅ Migrated: added machines.last_risk_at")
+        if "site_id" not in cols:
+            conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN site_id INTEGER")
+            conn.commit()
+            print("✅ Migrated: added machines.site_id")
+
+        audit_cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(audit_logs)").fetchall()]
+        if "content_hash" not in audit_cols:
+            conn.exec_driver_sql("ALTER TABLE audit_logs ADD COLUMN content_hash VARCHAR")
+            conn.commit()
+            print("✅ Migrated: added audit_logs.content_hash")
+
         report_cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(reports)").fetchall()]
         if "machine_ids" not in report_cols:
             conn.exec_driver_sql("ALTER TABLE reports ADD COLUMN machine_ids VARCHAR")
@@ -237,9 +324,25 @@ def _migrate_schema():
             print("✅ Migrated: added reports.report_type")
 
 
+def backfill_audit_hashes():
+    """One-time (idempotent) backfill of content_hash for rows that predate the column."""
+    with engine.connect() as conn:
+        rows = conn.exec_driver_sql(
+            "SELECT id, machine_id, user_id, action, detail, status, timestamp "
+            "FROM audit_logs WHERE content_hash IS NULL"
+        ).fetchall()
+        for log_id, machine_id, user_id, action, detail, status, timestamp in rows:
+            h = compute_audit_hash(log_id, machine_id, user_id, action, detail, status, timestamp)
+            conn.exec_driver_sql("UPDATE audit_logs SET content_hash = ? WHERE id = ?", (h, log_id))
+        conn.commit()
+    if rows:
+        print(f"✅ Backfilled content_hash for {len(rows)} audit_logs rows")
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
+    backfill_audit_hashes()
     _seed_admin()
 
 

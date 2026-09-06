@@ -13,16 +13,35 @@ async def agent_endpoint(websocket: WebSocket, token: str):
     from alert_cooldown import should_create_alert
 
     await websocket.accept()
+
     _agents[token] = websocket
 
     db = SessionLocal()
     try:
         m = db.query(Machine).filter(Machine.token == token).first()
+        print(f"[DEBUG] received token repr: {token!r} len={len(token)}")
+        print(f"[DEBUG] query result: {m.id if m else None} status={m.status if m else None}")
+        all_tokens = [row.token for row in db.query(Machine).all()]
+        print(f"[DEBUG] all tokens in db right now: {all_tokens}")
         if not m:
             _agents.pop(token, None)
             await websocket.close(code=4001)
             return
         if m.status == "pending":
+            if m.redirect_target_url:
+                target_url = m.redirect_target_url
+                try:
+                    await websocket.send_text(json.dumps({
+                        "type": "redirect_server",
+                        "server_url": target_url,
+                    }))
+                except Exception:
+                    pass
+                db.delete(m)
+                db.commit()
+                _agents.pop(token, None)
+                await websocket.close(code=4004)
+                return
             _agents.pop(token, None)
             await websocket.close(code=4003)
             return
@@ -34,11 +53,15 @@ async def agent_endpoint(websocket: WebSocket, token: str):
     finally:
         db.close()
 
+
     print(f"[WS] Agent connected: {hostname} (id={machine_id})")
+
 
     try:
         while True:
+
             raw      = await websocket.receive_text()
+
             data     = json.loads(raw)
             msg_type = data.get("type")
 
@@ -186,13 +209,34 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                 finally:
                     db.close()
 
+            elif msg_type == "checkpoint_status":
+                db = SessionLocal()
+                try:
+                    m = db.query(Machine).filter(Machine.token == token).first()
+                    if m:
+                        m.checkpoint_status = data.get("status")
+                        m.checkpoint_snapshot_id = data.get("checkpoint_id")
+                        m.checkpoint_armed_at = datetime.utcnow() if data.get("status") == "armed" else None
+                        db.commit()
+                        await _broadcast_dashboards({
+                            "type": "checkpoint_status",
+                            "machine_id": m.id,
+                            "checkpoint_id": data.get("checkpoint_id"),
+                            "status": data.get("status"),
+                        })
+                finally:
+                    db.close()
+
             elif msg_type == "ping":
                 await websocket.send_text(json.dumps({"type":"pong"}))
 
-    except WebSocketDisconnect:
+    except WebSocketDisconnect as e:
         pass
     except Exception as e:
-        print(f"[WS] Agent error: {e}")
+        import traceback as _tb
+        import time as _t
+        print(f"[WS] Agent error t={_t.time():.3f}: {e}")
+        _tb.print_exc()
     finally:
         _agents.pop(token, None)
         db = SessionLocal()
@@ -201,17 +245,19 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                 m = db.query(Machine)\
                       .filter(Machine.token == token).first()
                 if m:
-                    m.status = "offline"
+                    was_reassigning = (m.status == "reassigning")
+                    m.status = "reassigned" if was_reassigning else "offline"
                     db.commit()
-                    from notifications import notify_machine_offline
-                    from alert_cooldown import should_create_alert
-                    if should_create_alert(m.id, "offline"):
-                        asyncio.create_task(asyncio.to_thread(
-                            notify_machine_offline, m.hostname, m.ip))
+                    if not was_reassigning:
+                        from notifications import notify_machine_offline
+                        from alert_cooldown import should_create_alert
+                        if should_create_alert(m.id, "offline"):
+                            asyncio.create_task(asyncio.to_thread(
+                                notify_machine_offline, m.hostname, m.ip))
                     await _broadcast_dashboards({
                         "type":       "status",
                         "machine_id": m.id,
-                        "status":     "offline",
+                        "status":     m.status,
                     })
             except (StaleDataError, ObjectDeletedError):
                 db.rollback()
@@ -221,8 +267,19 @@ async def agent_endpoint(websocket: WebSocket, token: str):
             db.close()
         print(f"[WS] Agent disconnected: {hostname}")
 
-async def dashboard_endpoint(websocket: WebSocket):
+async def dashboard_endpoint(websocket: WebSocket, token: str = None):
+    from auth import decode_ws_token
+
     await websocket.accept()
+    if not token:
+        await websocket.close(code=4001)
+        return
+    try:
+        decode_ws_token(token)
+    except ValueError:
+        await websocket.close(code=4001)
+        return
+
     _dashboards.append(websocket)
     print(f"[WS] Dashboard connected — total: {len(_dashboards)}")
     try:

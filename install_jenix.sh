@@ -17,11 +17,18 @@ echo ""
 if [ -z "$JENIX_SERVER" ]; then
     echo "Where is your JENIX Enterprise server running?"
     echo "  (e.g. http://192.168.1.10:8000 or https://jenix.yourcompany.com)"
-    read -p "Server address [http://localhost:8000]: " SERVER_INPUT
+    read -p "Server address [http://localhost:8000]: " SERVER_INPUT < /dev/tty
     JENIX_SERVER="${SERVER_INPUT:-http://localhost:8000}"
 fi
 echo "Using JENIX server: $JENIX_SERVER"
 echo ""
+
+if [ -n "$JENIX_SITE_ID" ]; then
+    mkdir -p ~/.jenix
+    echo "$JENIX_SITE_ID" > ~/.jenix/site_id
+    echo "Site ID: $JENIX_SITE_ID (will be sent at registration)"
+fi
+
 
 # ── Detect OS ─────────────────────────────────────────────────────────────────
 detect_os() {
@@ -116,7 +123,7 @@ SERVICE
     echo ""
 
     # Launch GUI immediately
-    read -p "Launch JENIX Agent now? [Y/n] " -n 1 -r
+    read -p "Launch JENIX Agent now? [Y/n] " -n 1 -r < /dev/tty
     echo ""
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         JENIX_SERVER="$JENIX_SERVER" ~/.jenix/JenixAgent &
@@ -185,7 +192,7 @@ PLIST
     echo "╚══════════════════════════════════════════════╝"
     echo ""
 
-    read -p "Launch JENIX Agent now? [Y/n] " -n 1 -r
+    read -p "Launch JENIX Agent now? [Y/n] " -n 1 -r < /dev/tty
     echo ""
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         JENIX_SERVER="$JENIX_SERVER" ~/.jenix/JenixAgent &

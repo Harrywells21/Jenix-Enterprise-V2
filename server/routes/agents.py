@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from db import get_db, Machine, AuditLog, hash_passphrase
+from db import get_db, Machine, AuditLog, hash_passphrase, Site
 from auth import get_current_user, require_admin, User
 from datetime import datetime
 import secrets
@@ -16,6 +16,7 @@ class MachineRegister(BaseModel):
     token:    str | None = None  # cached token from a prior registration, if any -
                                   # used as the primary identity key to prevent
                                   # duplicate rows from IP drift or hostname collisions
+    site_id:  int | None = None  # optional Site to pre-assign at install time
 
 class MachineOut(BaseModel):
     id:        int
@@ -23,6 +24,7 @@ class MachineOut(BaseModel):
     ip:        str
     os_name:   str
     kernel:    str
+    site_id:   int | None = None
     status:    str
     last_seen: datetime
     class Config:
@@ -58,7 +60,8 @@ def register(body: MachineRegister, db: Session = Depends(get_db)):
     machine = Machine(
         hostname=body.hostname, ip=body.ip,
         os_name=body.os_name,  kernel=body.kernel,
-        token=token, status="pending"  # requires admin approval before it can connect over WS
+        token=token, status="pending",  # requires admin approval before it can connect over WS
+        site_id=body.site_id  # from install-time ?site_id= param, if any; only applied on genuine first-time creation
     )
     db.add(machine); db.commit(); db.refresh(machine)
     log = AuditLog(machine_id=machine.id, action="registered",
@@ -87,29 +90,57 @@ def list_pending_machines(db: Session = Depends(get_db),
 
 @router.get("/install-command")
 def get_install_command(request: Request,
+                        site_id: int | None = None,
+                        db: Session = Depends(get_db),
                         _: User = Depends(require_admin)):
     """Returns the real, working one-liner for the dashboard's Add Node
     modal. Points at the actual GET /install route (server/main.py),
-    which serves install_jenix.sh directly."""
+    which serves install_jenix.sh directly. If site_id is given, it's
+    validated and env-var-prefixed onto the bash process reading the
+    piped script, so install_jenix.sh can pick it up as $JENIX_SITE_ID."""
+    if site_id is not None:
+        site = db.query(Site).filter(Site.id == site_id).first()
+        if not site:
+            raise HTTPException(status_code=404, detail="Site not found")
     server_addr = request.url.hostname
     server_port = request.url.port or 8000
     scheme      = request.url.scheme
     base        = f"{scheme}://{server_addr}:{server_port}"
+    if site_id is not None:
+        command = f"curl -sSL {base}/install | JENIX_SITE_ID={site_id} bash"
+    else:
+        command = f"curl -sSL {base}/install | bash"
     return {
-        "command": f"curl -sSL {base}/install | bash",
+        "command": command,
         "note": "Run on the target Linux/macOS machine. It installs the "
                 "agent, registers with this server, and the machine will "
                 "appear below awaiting approval.",
     }
 
+class ApproveIn(BaseModel):
+    redirect_target_url: str | None = None
+    site_id: int | None = None  # optional override/confirm at approval time
+
 @router.post("/{machine_id}/approve")
-def approve_machine(machine_id: int, db: Session = Depends(get_db),
+def approve_machine(machine_id: int, body: ApproveIn = ApproveIn(),
+                    db: Session = Depends(get_db),
                     current_user: User = Depends(require_admin)):
     m = db.query(Machine).filter(Machine.id == machine_id).first()
     if not m:
         raise HTTPException(status_code=404, detail="Machine not found")
     if m.status != "pending":
         raise HTTPException(status_code=400, detail=f"Machine is not pending (status={m.status})")
+    if body.redirect_target_url:
+        m.redirect_target_url = body.redirect_target_url
+        db.commit()
+        log = AuditLog(machine_id=machine_id, user_id=current_user.id,
+                       action="node_redirect_pending",
+                       detail=f"{m.hostname} ({m.ip}) redirected to {body.redirect_target_url} by {current_user.name} - will re-register there on next connect attempt",
+                       status="ok")
+        db.add(log); db.commit()
+        return {"status": "redirect_pending", "machine_id": machine_id, "redirect_target_url": body.redirect_target_url}
+    if body.site_id is not None:
+        m.site_id = body.site_id
     m.status = "offline"  # ready to connect; WS handler sets "online" once it actually does
     db.commit()
     log = AuditLog(machine_id=machine_id, user_id=current_user.id,

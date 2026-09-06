@@ -6,6 +6,7 @@ from pathlib import Path
 TOKEN_FILE   = Path.home() / ".jenix" / "agent.token"
 MACHINE_FILE = Path.home() / ".jenix" / "agent.machine_id"
 SERVER_FILE  = Path.home() / ".jenix" / "server_url"
+SITE_FILE    = Path.home() / ".jenix" / "site_id"
 def _load_server_url() -> str:
     env = os.getenv("JENIX_SERVER")
     if env:
@@ -19,6 +20,23 @@ SERVER_URL   = _load_server_url()
 WS_URL       = SERVER_URL.replace("http://", "ws://").replace("https://", "wss://")
 METRICS_INTERVAL = 2
 RECONNECT_DELAY  = 5
+
+class RedirectToNewFloor(Exception):
+    def __init__(self, new_url):
+        super().__init__(f"redirect to {new_url}")
+        self.new_url = new_url
+
+def _apply_redirect(new_url: str):
+    global SERVER_URL, WS_URL
+    SERVER_URL = new_url.rstrip("/")
+    WS_URL = SERVER_URL.replace("http://", "ws://").replace("https://", "wss://")
+    SERVER_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SERVER_FILE.write_text(SERVER_URL)
+    for f in (TOKEN_FILE, MACHINE_FILE):
+        try:
+            f.unlink()
+        except FileNotFoundError:
+            pass
 
 _stop = False
 
@@ -42,6 +60,11 @@ def register_with_server() -> tuple[str, int]:
     info = get_system_info()
     if cached_token:
         info["token"] = cached_token
+    if SITE_FILE.exists():
+        try:
+            info["site_id"] = int(SITE_FILE.read_text().strip())
+        except ValueError:
+            pass
 
     payload = json.dumps(info).encode()
     req     = urllib.request.Request(
@@ -84,7 +107,7 @@ async def run_agent(token: str):
 
     async with websockets.connect(uri, ping_interval=20,
                                        ping_timeout=10) as ws:
-        print("[agent] Connected ✅")
+        import time as _t; print(f"[AGENTDEBUG] connected t={_t.time():.3f}")
 
         # Send register message so server creates the node in DB
         from collector import get_system_info
@@ -99,6 +122,7 @@ async def run_agent(token: str):
             }
         }))
         print("[agent] Register message sent ✅")
+        print(f"[AGENTDEBUG] register sent t={_t.time():.3f}")
 
         # Capture the running event loop here — in the async context
         loop = asyncio.get_running_loop()
@@ -138,10 +162,40 @@ async def run_agent(token: str):
                         execute_command(cmd_type, cmd_id, _sync_send, params)
                     elif data.get("type") == "pong":
                         pass
+                    elif data.get("type") == "redirect_server":
+                        new_url = data.get("server_url")
+                        if new_url:
+                            print(f"[agent] Redirected to new floor: {new_url}")
+                            raise RedirectToNewFloor(new_url)
+                except RedirectToNewFloor:
+                    raise
                 except Exception as e:
                     print(f"[agent] recv error: {e}")
 
-        await asyncio.gather(_metrics_loop(), _recv_loop())
+        metrics_task = asyncio.create_task(_metrics_loop())
+        recv_task    = asyncio.create_task(_recv_loop())
+        try:
+            done, pending = await asyncio.wait(
+                {metrics_task, recv_task}, return_when=asyncio.FIRST_COMPLETED)
+            for leftover in pending:
+                leftover.cancel()
+                try:
+                    await leftover
+                except asyncio.CancelledError:
+                    pass
+            for finished in done:
+                task_exc = finished.exception()
+                if task_exc is not None:
+                    raise task_exc
+        except Exception as _e:
+            import traceback as _tb
+            print(f"[AGENTDEBUG] gather raised t={_t.time():.3f}: {_e}")
+            _tb.print_exc()
+            raise
+        finally:
+            for spawned in (metrics_task, recv_task):
+                if not spawned.done():
+                    spawned.cancel()
 
 PENDING_APPROVAL_DELAY = 60   # server closed with 4003 (pending admin approval) — slow human-driven process, don't hammer it
 INVALID_TOKEN_DELAY    = 120  # server closed with 4001 (invalid token) — will never self-resolve on its own
@@ -161,6 +215,16 @@ async def main():
         try:
             await run_agent(token)
             backoff = RECONNECT_DELAY  # reset after any clean run
+        except RedirectToNewFloor as e:
+            print(f"[agent] Redirect: switching to {e.new_url}")
+            _apply_redirect(e.new_url)
+            try:
+                token, _ = register_with_server()
+            except Exception as reg_e:
+                print(f"[agent] Re-registration after redirect failed: {reg_e} - retrying in {RECONNECT_DELAY}s")
+                import asyncio as _aio
+                await _aio.sleep(RECONNECT_DELAY)
+            continue
         except websockets.exceptions.ConnectionClosed as e:
             code = getattr(e, "code", None)
             if code == 4003:

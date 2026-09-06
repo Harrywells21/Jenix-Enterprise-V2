@@ -69,18 +69,19 @@
   .floor-name { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; }
   .floor-url { font-size: 11px; color: rgba(122,143,166,0.5); margin-top: 2px; font-family: 'JetBrains Mono', monospace; }
   .floor-stats { display: flex; gap: 14px; font-size: 12px; }
-  .badge-online { color: #10b981; } .badge-offline { color: #f43f5e; } .badge-pending { color: #f59e0b; }
+  .badge-online { color: #10b981; } .badge-offline { color: #f43f5e; } .badge-pending { color: #f59e0b; } .badge-reassigned { color: #8b5cf6; }
 
   .rack-strip { display: flex; gap: 4px; padding: 10px 0 14px 0; flex-wrap: wrap; }
   .rack-led { width: 10px; height: 10px; border-radius: 2px; }
   .rack-led.online { background: #10b981; box-shadow: 0 0 6px #10b981aa; }
   .rack-led.offline { background: #3f2530; }
   .rack-led.pending { background: #f59e0b; box-shadow: 0 0 6px #f59e0baa; }
+  .rack-led.reassigned { background: #8b5cf6; box-shadow: 0 0 6px #8b5cf6aa; }
 
   .machine-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 8px 0; border-top: 1px solid rgba(255,255,255,0.06); cursor: pointer; }
   .machine-row:hover { background: rgba(255,255,255,0.02); margin: 0 -18px; padding-left: 18px; padding-right: 18px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
-  .dot-online { background: #10b981; } .dot-offline { background: #f43f5e; } .dot-pending { background: #f59e0b; }
+  .dot-online { background: #10b981; } .dot-offline { background: #f43f5e; } .dot-pending { background: #f59e0b; } .dot-reassigned { background: #8b5cf6; }
   .detail-panel { background: #020617; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 14px; margin: 8px 0; font-size: 12px; }
   .detail-stats { display: flex; gap: 16px; margin-bottom: 12px; }
   .btn { border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; color: #fff; margin-right: 6px; font-family: inherit; }
@@ -148,6 +149,7 @@
   .m-card-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 20px; font-size: 10px; font-weight: 600; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.06em; }
   .m-card-badge.online { background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2); color: #10b981; }
   .m-card-badge.offline { background: rgba(244,63,94,0.08); border: 1px solid rgba(244,63,94,0.2); color: #f43f5e; }
+  .m-card-badge.reassigned { background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.2); color: #8b5cf6; }
   .m-card-meta { font-size: 11px; color: rgba(122,143,166,0.5); font-family: 'JetBrains Mono', monospace; }
   .m-card-os { display: inline-block; margin-top: 10px; padding: 2px 8px; border-radius: 4px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); font-size: 10px; color: rgba(122,143,166,0.5); font-family: 'JetBrains Mono', monospace; }
   .preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
@@ -200,7 +202,9 @@
         <button class="action-btn action-scan"  onclick="quickCommand('scan')">⚡ Fleet Scan ALL</button>
         <button class="action-btn action-boost" onclick="quickCommand('boost')">⚡ Boost ALL</button>
         <button class="action-btn action-clean" onclick="quickCommand('clean')">⚡ Clean ALL</button>
+        <button class="action-btn" style="background:#8b5cf6;" onclick="quickCheckpoint()">◆ Checkpoint ALL</button>
         <button class="action-btn action-node"  onclick="openInstallModal()">+ Add Node</button>
+        <button class="action-btn" style="background:#10b981;" onclick="openAddFloorModal()">+ Add Floor</button>
       </div>
     </div>
 
@@ -226,6 +230,7 @@
           <button class="cmd-btn" onclick="quickCommand('scan')"><div class="cmd-icon">🛡</div><div class="cmd-label">Fleet Scan</div><div class="cmd-desc">Bulk scan — all online nodes</div></button>
           <button class="cmd-btn" onclick="quickCommand('boost')"><div class="cmd-icon">⚡</div><div class="cmd-label">Boost</div><div class="cmd-desc">Optimize performance</div></button>
           <button class="cmd-btn" onclick="quickCommand('clean')"><div class="cmd-icon">🧹</div><div class="cmd-label">Clean</div><div class="cmd-desc">Remove junk & temp files</div></button>
+          <button class="cmd-btn" onclick="quickCheckpoint()"><div class="cmd-icon">◆</div><div class="cmd-label">Checkpoint</div><div class="cmd-desc">Path-scoped backup — all online nodes</div></button>
           <button class="cmd-btn" onclick="openExecModal()"><div class="cmd-icon">📜</div><div class="cmd-label">Run Signed Script</div><div class="cmd-desc">Custom exec — all online nodes</div></button>
         </div>
       </div>
@@ -246,6 +251,7 @@
           <button class="filter-pill active" data-f="all" onclick="setAmFilter('all')">All</button>
           <button class="filter-pill" data-f="online" onclick="setAmFilter('online')">Online</button>
           <button class="filter-pill" data-f="offline" onclick="setAmFilter('offline')">Offline</button>
+          <button class="filter-pill" data-f="reassigned" onclick="setAmFilter('reassigned')">Reassigned</button>
         </div>
       </div>
       <div style="position:relative; margin-bottom:20px; max-width:360px;">
@@ -390,6 +396,7 @@ let historySelectedDate = null;
 let schedulesCache = [];
 let presetsCache = [];
 let reportsCache = [];
+let upgradeInfoByOs = {};   // v23: os_name -> {version, ...} for staged builds
 
 async function api(url, opts) {
   const res = await fetch(url, opts);
@@ -409,6 +416,17 @@ function showToast(msg, ok = true) {
   setTimeout(() => el.remove(), 3500);
 }
 
+// Reassignment-cleanup (v22): 'reassigning'/'reassigned' are distinct
+// from a real offline/dead node — visually separate, never counted
+// as either online or a genuine offline failure.
+function isReassignedStatus(status) {
+  return status === 'reassigning' || status === 'reassigned';
+}
+function machineStatusClass(m) {
+  if (isReassignedStatus(m.status)) return 'reassigned';
+  return m.status === 'online' ? 'online' : 'offline';
+}
+
 async function loadAll() {
   try {
     const [agg, overview, sav, alerts] = await Promise.all([
@@ -421,10 +439,31 @@ async function loadAll() {
     fleetOverview = overview;
     savings = sav;
     alertsCache = alerts;
+    await loadUpgradeInfo();
     render();
   } catch (e) {
     console.error(e);
   }
+}
+
+// v23: fetch staged-upgrade info per distinct os_name seen in the fleet.
+// Fails soft per-OS: an unmatched os_name just yields no entry, so no
+// badge/section renders for those machines rather than erroring out.
+async function loadUpgradeInfo() {
+  const osNames = new Set();
+  (currentData?.floors || []).forEach(f => f.machines.forEach(m => { if (m.os_name) osNames.add(m.os_name); }));
+  const entries = await Promise.all([...osNames].map(async os => {
+    try {
+      const family = normalizeOsFamily(os);
+      const info = await api(`/api/upgrades/latest?os_name=${encodeURIComponent(family)}`);
+      return [os, info];
+    } catch (e) { return [os, null]; }
+  }));
+  upgradeInfoByOs = Object.fromEntries(entries.filter(([, info]) => info));
+}
+
+function upgradeAvailableFor(m) {
+  return !!(m && m.os_name && upgradeInfoByOs[m.os_name]);
 }
 
 function render() {
@@ -540,12 +579,16 @@ function renderTabContent() {
 function rackStrip(floor) {
   const leds = [];
   floor.pending.forEach(() => leds.push('pending'));
-  floor.machines.forEach(m => leds.push(m.status === 'online' ? 'online' : 'offline'));
+  floor.machines.forEach(m => leds.push(machineStatusClass(m)));
   return leds.map(s => `<div class="rack-led ${s}"></div>`).join('');
 }
 
 function floorSelectOptions(floors, excludeIdx) {
   return floors.filter(f => f.idx !== excludeIdx).map(f => `<option value="${f.idx}">${f.name}</option>`).join('');
+}
+
+function floorSelectOptionsIncluding(floors, currentIdx) {
+  return floors.map(f => `<option value="${f.idx}" ${f.idx === currentIdx ? 'selected' : ''}>${f.name}${f.idx === currentIdx ? ' (this floor)' : ''}</option>`).join('');
 }
 
 function renderFloors() {
@@ -563,16 +606,24 @@ function renderFloors() {
       <div class="rack-strip">${rackStrip(f)}</div>
       ${!f.reachable ? `<div class="unreachable">⚠ Unreachable: ${f.error}</div>` : ''}
       ${f.pending.map(p => `
-        <div class="machine-row pending-row" style="padding:8px; border-radius:6px; margin-bottom:6px;">
-          <span><span class="dot dot-pending"></span>${p.hostname} (pending)</span>
-          <span>
-            <button class="btn btn-approve" onclick="approveMachine(${f.idx}, ${p.id})">Approve</button>
-            <button class="btn btn-reject" onclick="rejectMachine(${f.idx}, ${p.id})">Reject</button>
-          </span>
+        <div class="machine-row pending-row" style="padding:8px; border-radius:6px; margin-bottom:6px; flex-direction:column; align-items:stretch; gap:6px;">
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <span><span class="dot dot-pending"></span>${p.hostname} (pending)</span>
+            <span>
+              <button class="btn btn-approve" onclick="approveMachine(${f.idx}, ${p.id})">Approve</button>
+              <button class="btn btn-reject" onclick="rejectMachine(${f.idx}, ${p.id})">Reject</button>
+            </span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:11px; color:rgba(122,143,166,0.6);">Approve onto:</span>
+            <select class="floor-select" id="pending-floor-${f.idx}-${p.id}" style="font-size:11px;">
+              ${floorSelectOptionsIncluding(currentData.floors, f.idx)}
+            </select>
+          </div>
         </div>`).join('')}
       ${f.machines.map(m => `
         <div class="machine-row" onclick="toggleDetail(${f.idx}, ${m.id})">
-          <span><span class="dot ${m.status === 'online' ? 'dot-online' : 'dot-offline'}"></span>${m.hostname}</span>
+          <span><span class="dot dot-${machineStatusClass(m)}"></span>${m.hostname}</span>
           <span>${m.status}</span>
         </div>
         <div id="detail-${f.idx}-${m.id}" style="display:none;"></div>`).join('')}
@@ -612,6 +663,22 @@ async function toggleDetail(floorIdx, machineId, prefix = '') {
           <button class="btn btn-move" ${!isOnline ? 'disabled title="Node must be online to reassign"' : ''} onclick="moveMachine(${floorIdx}, ${machineId}, '${prefix}')">Move</button>
         </div>
         <div class="move-status" id="${prefix}move-status-${floorIdx}-${machineId}"></div>
+        ${upgradeAvailableFor(m) ? `
+        <div class="reassign-row" style="border-top:1px solid rgba(255,255,255,0.06); padding-top:10px; margin-top:10px;">
+          <span style="color:#f59e0b;">⬆ Upgrade available: v${upgradeInfoByOs[m.os_name].version}</span>
+          <button class="btn" style="background:#f59e0b; color:#020617; font-weight:600;" onclick="approveUpgrade(${floorIdx}, ${machineId}, '${prefix}', '${upgradeInfoByOs[m.os_name].version}', '${normalizeOsFamily(m.os_name)}')">Approve Upgrade</button>
+        </div>
+        <div class="move-status" id="${prefix}upgrade-status-${floorIdx}-${machineId}"></div>` : ''}
+        ${m.checkpoint_status === 'armed' ? `
+        <div class="reassign-row" style="border-top:1px solid rgba(255,255,255,0.06); padding-top:10px; margin-top:10px;">
+          <span style="color:#8b5cf6;">◆ Checkpoint armed (id ${m.checkpoint_snapshot_id})</span>
+          <button class="btn" style="background:#8b5cf6; color:#020617; font-weight:600;" onclick="checkpointRestore(${floorIdx}, ${machineId}, '${prefix}', '${m.checkpoint_snapshot_id}')">Reload Original State</button>
+          <button class="btn" style="background:rgba(139,92,246,0.15); color:#8b5cf6; font-weight:600;" onclick="checkpointDiscard(${floorIdx}, ${machineId}, '${prefix}', '${m.checkpoint_snapshot_id}')">Keep Current State</button>
+        </div>
+        <div class="move-status" id="${prefix}checkpoint-status-${floorIdx}-${machineId}"></div>` : ''}
+        <div class="reassign-row" style="border-top:1px solid rgba(255,255,255,0.06); padding-top:10px; margin-top:10px;">
+          <button class="btn" onclick="openCheckpointCleanup(${floorIdx}, ${machineId}, '${prefix}')">Manage Checkpoints</button>
+        </div>
       </div>`;
   } catch (e) {
     panel.innerHTML = `<div class="detail-panel">Error: ${e.message}</div>`;
@@ -619,7 +686,17 @@ async function toggleDetail(floorIdx, machineId, prefix = '') {
 }
 
 async function approveMachine(floorIdx, machineId) {
-  try { await api(`/api/floors/${floorIdx}/machines/${machineId}/approve`, { method: 'POST' }); loadAll(); }
+  const sel = document.getElementById(`pending-floor-${floorIdx}-${machineId}`);
+  const targetIdx = sel ? parseInt(sel.value, 10) : floorIdx;
+  const body = (targetIdx !== floorIdx) ? { target_floor_idx: targetIdx } : {};
+  try {
+    await api(`/api/floors/${floorIdx}/machines/${machineId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    loadAll();
+  }
   catch (e) { showToast('Approve failed: ' + e.message, false); }
 }
 async function rejectMachine(floorIdx, machineId) {
@@ -668,6 +745,23 @@ async function moveMachine(floorIdx, machineId, prefix = '') {
   } catch (e) { statusEl.textContent = 'Reassign failed: ' + e.message; }
 }
 
+async function approveUpgrade(floorIdx, machineId, prefix = '', version = '', osName = '') {
+  const statusEl = document.getElementById(`${prefix}upgrade-status-${floorIdx}-${machineId}`);
+  if (statusEl) statusEl.textContent = 'Dispatching upgrade...';
+  try {
+    await api(`/api/floors/${floorIdx}/machines/${machineId}/approve-upgrade`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version, os_name: osName })
+    });
+    if (statusEl) statusEl.textContent = 'Upgrade approved and dispatched.';
+    showToast('Upgrade dispatched');
+    setTimeout(loadAll, 2000);
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Upgrade approve failed: ' + e.message;
+    showToast('Upgrade approve failed: ' + e.message, false);
+  }
+}
+
 async function markAllRead() {
   try { await api('/api/analytics/alerts/mark-all-read', { method: 'POST' }); showToast('All alerts marked read'); loadAll(); }
   catch (e) { showToast(e.message, false); }
@@ -686,6 +780,94 @@ async function quickCommand(type) {
     showToast(`${type} dispatched → ${r.sent}/${r.total} nodes`);
     setTimeout(loadAll, 1500);
   } catch (e) { showToast('Command failed: ' + e.message, false); }
+}
+
+async function quickCheckpoint() {
+  const extra = prompt('Extra paths to include (comma-separated, optional — /etc, /home, /var/www, /opt are always included):') || '';
+  const paths = extra.split(',').map(p => p.trim()).filter(Boolean);
+  try {
+    const r = await api('/api/fleet/checkpoint-start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths })
+    });
+    showToast(`Checkpoint dispatched → ${r.sent}/${r.total} nodes`);
+    setTimeout(loadAll, 1500);
+  } catch (e) { showToast('Checkpoint failed: ' + e.message, false); }
+}
+
+async function checkpointRestore(floorIdx, machineId, prefix, checkpointId) {
+  const statusEl = document.getElementById(`${prefix}checkpoint-status-${floorIdx}-${machineId}`);
+  if (statusEl) statusEl.textContent = 'Restoring...';
+  try {
+    await api(`/api/floors/${floorIdx}/machines/${machineId}/checkpoint-restore`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checkpoint_id: checkpointId })
+    });
+    showToast('Checkpoint restore dispatched');
+    setTimeout(loadAll, 1500);
+  } catch (e) { showToast('Checkpoint restore failed: ' + e.message, false); }
+}
+
+async function checkpointDiscard(floorIdx, machineId, prefix, checkpointId) {
+  try {
+    await api(`/api/floors/${floorIdx}/machines/${machineId}/checkpoint-discard`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checkpoint_id: checkpointId })
+    });
+    showToast('Checkpoint discarded');
+    setTimeout(loadAll, 1500);
+  } catch (e) { showToast('Checkpoint discard failed: ' + e.message, false); }
+}
+
+async function openCheckpointCleanup(floorIdx, machineId, prefix) {
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-backdrop" onclick="if(event.target===this) closeModal()">
+      <div class="modal">
+        <button class="close-btn" onclick="closeModal()">×</button>
+        <h3>Manage Checkpoints</h3>
+        <div id="checkpoint-cleanup-body">Loading checkpoints...</div>
+      </div>
+    </div>`;
+  await refreshCheckpointCleanup(floorIdx, machineId);
+}
+
+async function refreshCheckpointCleanup(floorIdx, machineId) {
+  const body = document.getElementById('checkpoint-cleanup-body');
+  if (!body) return;
+  body.textContent = 'Loading checkpoints...';
+  try {
+    const dispatch = await api(`/api/floors/${floorIdx}/machines/${machineId}/checkpoint-list`, { method: 'POST' });
+    const cmdId = dispatch.cmd_id;
+    let result = null;
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const cmd = await api(`/api/floors/${floorIdx}/machines/${machineId}/command/${cmdId}`, { method: 'GET' });
+      if (cmd.status === 'done') { result = cmd.output; break; }
+      if (cmd.status === 'failed') { body.textContent = 'Failed to list checkpoints: ' + cmd.output; return; }
+    }
+    if (!result) { body.textContent = 'Timed out waiting for checkpoint list.'; return; }
+    const items = JSON.parse(result);
+    if (!items.length) { body.textContent = 'No checkpoints stored on this machine.'; return; }
+    body.innerHTML = items.map(cp => `
+      <div class="reassign-row" style="border-top:1px solid rgba(255,255,255,0.06); padding-top:10px; margin-top:10px;">
+        <span>${cp.id} — ${(cp.size_bytes / (1024*1024)).toFixed(1)}MB — ${cp.created_at}</span>
+        <button class="btn" style="background:rgba(239,68,68,0.15); color:#ef4444; font-weight:600;"
+                onclick="deleteCheckpointFromCleanup(${floorIdx}, ${machineId}, '${cp.id}')">Delete</button>
+      </div>`).join('');
+  } catch (e) {
+    body.textContent = 'Error loading checkpoints: ' + e.message;
+  }
+}
+
+async function deleteCheckpointFromCleanup(floorIdx, machineId, checkpointId) {
+  try {
+    await api(`/api/floors/${floorIdx}/machines/${machineId}/checkpoint-discard`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checkpoint_id: checkpointId })
+    });
+    showToast('Checkpoint deleted');
+    await refreshCheckpointCleanup(floorIdx, machineId);
+  } catch (e) { showToast('Delete failed: ' + e.message, false); }
 }
 
 function openExecModal() {
@@ -745,6 +927,54 @@ async function openInstallModal() {
       </div>`).join('');
   } catch (e) {
     listEl.innerHTML = `<div style="color:#f43f5e;">Failed to load: ${e.message}</div>`;
+  }
+}
+
+async function openAddFloorModal() {
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-backdrop" onclick="if(event.target===this) closeModal()">
+      <div class="modal">
+        <button class="close-btn" onclick="closeModal()">×</button>
+        <h3>Add Floor</h3>
+        <div style="margin-top:14px;">
+          <label style="display:block; font-size:11px; color:rgba(122,143,166,0.6); margin-bottom:4px;">Name</label>
+          <input class="filter-input" id="add-floor-name" placeholder="e.g. Floor 3 - Warehouse" style="width:100%; margin-bottom:12px;">
+          <label style="display:block; font-size:11px; color:rgba(122,143,166,0.6); margin-bottom:4px;">URL</label>
+          <input class="filter-input" id="add-floor-url" placeholder="http://10.x.x.x:PORT" style="width:100%; margin-bottom:12px;">
+          <label style="display:block; font-size:11px; color:rgba(122,143,166,0.6); margin-bottom:4px;">Username</label>
+          <input class="filter-input" id="add-floor-username" placeholder="admin@jenix.io" style="width:100%; margin-bottom:12px;">
+          <label style="display:block; font-size:11px; color:rgba(122,143,166,0.6); margin-bottom:4px;">Password</label>
+          <input class="filter-input" id="add-floor-password" type="password" style="width:100%; margin-bottom:16px;">
+          <button class="btn btn-exec" style="width:100%;" onclick="submitAddFloor()">Add Floor</button>
+          <div id="add-floor-error" style="color:#f43f5e; font-size:12px; margin-top:8px;"></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function submitAddFloor() {
+  const name = document.getElementById('add-floor-name').value.trim();
+  const url = document.getElementById('add-floor-url').value.trim();
+  const username = document.getElementById('add-floor-username').value.trim();
+  const password = document.getElementById('add-floor-password').value;
+  const errEl = document.getElementById('add-floor-error');
+  errEl.textContent = '';
+  if (!name || !url || !username || !password) { errEl.textContent = 'All fields are required.'; return; }
+  try {
+    const r = await api('/api/floors/admin/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, url, username, password })
+    });
+    closeModal();
+    loadAll();
+    if (r.baked_trust === false) {
+      showToast('Floor added. Existing agent binaries will not trust redirects to it until tools/bake_topology.py is re-run and agents are rebuilt.', false);
+    } else {
+      showToast('Floor added');
+    }
+  } catch (e) {
+    errEl.textContent = e.message;
   }
 }
 
@@ -1090,6 +1320,18 @@ function osIcon(osName) {
   return '🖥';
 }
 
+// v24 follow-up: staged upgrades are keyed by a short OS family
+// ("linux"/"windows"/"mac"), but Machine.os_name is stored raw from
+// whatever the agent reports (e.g. "Linux 6.17.0-19-generic"). This
+// normalizes for API queries only -- upgradeInfoByOs itself stays keyed
+// by the raw os_name so existing lookups are unaffected.
+function normalizeOsFamily(osName) {
+  const n = (osName || '').toLowerCase();
+  if (n.includes('windows')) return 'windows';
+  if (n.includes('mac') || n.includes('darwin')) return 'mac';
+  return 'linux';
+}
+
 let selectedMachines = new Set();
 
 function machineKey(floorIdx, id) { return `${floorIdx}:${id}`; }
@@ -1172,13 +1414,18 @@ function renderAllMachines() {
     f.machines.forEach(m => allRows.push({ ...m, floorIdx: f.idx, floorName: f.name }));
   });
   const totalOnline = allRows.filter(m => m.status === 'online').length;
+  const totalReassigned = allRows.filter(m => isReassignedStatus(m.status)).length;
+  const totalOffline = allRows.length - totalOnline - totalReassigned;
   document.getElementById('allmachines-subtitle').textContent =
-    `${allRows.length} total across ${currentData.floors_total} floors · ${totalOnline} online · ${allRows.length - totalOnline} offline`;
+    `${allRows.length} total across ${currentData.floors_total} floors · ${totalOnline} online · ${totalOffline} offline` +
+    (totalReassigned ? ` · ${totalReassigned} reassigned` : '');
 
   const search = (document.getElementById('allmachines-search')?.value || '').trim().toLowerCase();
   function matches(m, floorName) {
+    const reassigned = isReassignedStatus(m.status);
     if (amFilter === 'online' && m.status !== 'online') return false;
-    if (amFilter === 'offline' && m.status === 'online') return false;
+    if (amFilter === 'offline' && (m.status === 'online' || reassigned)) return false;
+    if (amFilter === 'reassigned' && !reassigned) return false;
     if (search) {
       return (m.hostname || '').toLowerCase().includes(search) ||
              (m.ip || '').toLowerCase().includes(search) ||
@@ -1205,6 +1452,7 @@ function renderAllMachines() {
 
   gridEl.innerHTML = groups.map(g => {
     const onlineCount = g.machines.filter(m => m.status === 'online').length;
+    const reassignedCount = g.machines.filter(m => isReassignedStatus(m.status)).length;
     return `
       <div class="floor-card" style="margin-bottom:18px;">
         <div class="floor-header">
@@ -1212,12 +1460,14 @@ function renderAllMachines() {
           <div class="floor-stats">
             <span>Total: ${g.machines.length}</span>
             <span class="badge-online">On: ${onlineCount}</span>
-            <span class="badge-offline">Off: ${g.machines.length - onlineCount}</span>
+            <span class="badge-offline">Off: ${g.machines.length - onlineCount - reassignedCount}</span>
+            ${reassignedCount ? `<span class="badge-reassigned">Reassigned: ${reassignedCount}</span>` : ''}
           </div>
         </div>
         <div class="machine-grid" style="margin-top:14px;">
           ${g.machines.map(m => {
-            const isOnline = m.status === 'online';
+            const statusClass = machineStatusClass(m);
+            const statusLabel = statusClass === 'online' ? 'ONLINE' : statusClass === 'reassigned' ? 'REASSIGNED' : 'OFFLINE';
             const key = machineKey(g.floor.idx, m.id);
             const isSelected = selectedMachines.has(key);
             return `
@@ -1231,7 +1481,8 @@ function renderAllMachines() {
                         <div class="m-card-ip">${m.ip || '—'}</div>
                       </div>
                     </div>
-                    <span class="m-card-badge ${isOnline ? 'online' : 'offline'}">${isOnline ? 'ONLINE' : 'OFFLINE'}</span>
+                    <span class="m-card-badge ${statusClass}">${statusLabel}</span>
+                    ${upgradeAvailableFor(m) ? `<span class="m-card-badge" style="background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); color:#f59e0b; margin-left:6px;">⬆ UPGRADE</span>` : ''}
                   </div>
                   <div class="m-card-meta">last seen ${m.last_seen ? new Date(m.last_seen).toLocaleString() : '—'}</div>
                   <div class="m-card-os">${m.os_name || 'Unknown OS'}</div>

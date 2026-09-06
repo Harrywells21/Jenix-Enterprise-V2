@@ -35,6 +35,34 @@ def decode_token(token: str) -> dict:
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+WS_DASHBOARD_TOKEN_EXPIRE_SECONDS = 45
+
+def create_ws_token(user_id: int) -> str:
+    """Short-lived token (default 45s) for authenticating a dashboard
+    WebSocket connection, which can't send an Authorization header like a
+    normal request. Tagged with purpose=ws_dashboard so it can never be
+    reused as a real bearer token against a regular endpoint even if it
+    leaked (e.g. into a browser console log or URL bar history)."""
+    payload = {
+        "sub": str(user_id),
+        "purpose": "ws_dashboard",
+        "exp": datetime.utcnow() + timedelta(seconds=WS_DASHBOARD_TOKEN_EXPIRE_SECONDS),
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+def decode_ws_token(token: str) -> dict:
+    """Validates a ws-dashboard token. Raises ValueError (not
+    HTTPException -- this is called from raw WebSocket code, not a FastAPI
+    route) on anything missing/invalid/expired/wrong-purpose, so callers
+    can catch one exception type and close the socket with code=4001."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except jwt.PyJWTError:
+        raise ValueError("invalid or expired ws token")
+    if payload.get("purpose") != "ws_dashboard":
+        raise ValueError("wrong token purpose")
+    return payload
+
 def get_current_user(token: str = Depends(oauth2),
                      db: Session = Depends(get_db)) -> User:
     # Check blacklist first

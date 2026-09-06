@@ -58,3 +58,6 @@ server/static/static/js/
 master/topology_private.key
 master/cookies.txt
 master/nohup.out
+master/floors_secrets.key
+master/floors_secrets.json.bak_*
+server/reports/*.csv

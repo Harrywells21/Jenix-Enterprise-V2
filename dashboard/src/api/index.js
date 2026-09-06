@@ -38,9 +38,14 @@ export const getLogs          = (id)        => api.get(`/api/machines/${id}/logs
 
 // Pending enrollment
 export const getPendingMachines = ()   => api.get("/api/machines/pending");
-export const getInstallCommand  = ()   => api.get("/api/machines/install-command");
-export const approveMachine     = (id) => api.post(`/api/machines/${id}/approve`);
+export const getInstallCommand  = (site_id) => api.get("/api/machines/install-command", site_id ? { params: { site_id } } : undefined);
+export const approveMachine     = (id, site_id) => api.post(`/api/machines/${id}/approve`, site_id ? { site_id } : {});
 export const rejectMachine      = (id) => api.post(`/api/machines/${id}/reject`);
+
+// Sites
+export const getSites   = ()     => api.get("/api/sites");
+export const createSite = (name) => api.post("/api/sites", { name });
+export const deleteSite = (id)   => api.delete(`/api/sites/${id}`);
 
 // Metrics
 export const getMetrics = (id) => api.get(`/api/machines/${id}/metrics`);
@@ -93,12 +98,25 @@ export const testNotification   = (type) => api.post("/api/settings/notification
 
 // WebSocket
 export const connectDashboardWS = (onMessage) => {
+  // Fetches a short-lived ws-token before opening the socket (v24 WS-auth
+  // fix -- /ws/dashboard now requires one). Returns a plain object with a
+  // .close() method synchronously, NOT a Promise, so existing call sites
+  // doing `wsRef.current?.close()` on cleanup need no changes even though
+  // the token fetch + real WebSocket creation happen asynchronously.
   const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${wsProto}//${window.location.host}/ws/dashboard`);
-  ws.onmessage = (e) => onMessage(JSON.parse(e.data));
-  ws.onerror   = (e) => console.error("[WS] error", e);
-  ws.onclose   = ()  => console.log("[WS] dashboard disconnected");
-  return ws;
+  let ws = null;
+  let closed = false;
+  api.post("/api/auth/ws-token").then((res) => {
+    if (closed) return;
+    const wsToken = res.data.ws_token;
+    ws = new WebSocket(`${wsProto}//${window.location.host}/ws/dashboard?token=${wsToken}`);
+    ws.onmessage = (e) => onMessage(JSON.parse(e.data));
+    ws.onerror   = (e) => console.error("[WS] error", e);
+    ws.onclose   = ()  => console.log("[WS] dashboard disconnected");
+  }).catch((e) => console.error("[WS] failed to fetch ws token", e));
+  return {
+    close: () => { closed = true; if (ws) ws.close(); },
+  };
 };
 
 export default api;

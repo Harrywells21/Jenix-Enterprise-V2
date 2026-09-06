@@ -28,6 +28,7 @@ from routes.notify_settings import router as notify_router
 from routes.whitelabel      import router as whitelabel_router
 from routes.uptime          import router as uptime_router
 from routes.backup          import router as backup_router
+from routes.sites           import router as sites_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -96,6 +97,7 @@ for router in [
     license_router, analytics_router, fleet_router,
     audit_router, cve_router, notify_router,
     whitelabel_router, uptime_router, backup_router,
+    sites_router,
 ]:
     app.include_router(router, prefix="/api")
 
@@ -104,8 +106,8 @@ async def ws_agent(websocket: WebSocket, token: str):
     await agent_endpoint(websocket, token)
 
 @app.websocket("/ws/dashboard")
-async def ws_dashboard(websocket: WebSocket):
-    await dashboard_endpoint(websocket)
+async def ws_dashboard(websocket: WebSocket, token: str = None):
+    await dashboard_endpoint(websocket, token)
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(static_dir, exist_ok=True)

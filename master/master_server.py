@@ -16,12 +16,32 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.fernet import Fernet, InvalidToken
 import secrets, time
 from fastapi import Request
 from fastapi.responses import RedirectResponse, JSONResponse
 
+from fastapi import WebSocket
+import ws_relay
+
 
 app = FastAPI(title="JENIX Master Control Plane")
+
+@app.websocket("/ws/master-dashboard")
+async def ws_master_dashboard(websocket: WebSocket):
+    # Starlette's require_session HTTP middleware never runs for
+    # WebSocket scope, so this connection was previously wide open --
+    # check the same jenix_session cookie the rest of the app already uses.
+    session_token = websocket.cookies.get("jenix_session")
+    if not session_token or _sessions.get(session_token, 0) <= time.time():
+        await websocket.close(code=4001)
+        return
+    await ws_relay.master_dashboard_endpoint(websocket)
+
+@app.on_event("startup")
+async def _start_ws_relays():
+    ws_relay._relay_tasks = await ws_relay.start_relays(get_floors(), get_ws_token)
+
 # === JENIX AUTH PATCH v1 ===
 ADMIN_AUTH_FILE = Path(__file__).parent / "admin_auth.json"
 SESSION_HOURS = 12
@@ -33,7 +53,7 @@ def _load_admin_auth():
     return json.loads(ADMIN_AUTH_FILE.read_text())
 
 _EXEMPT_PATHS = {"/login", "/logout"}
-_EXEMPT_PREFIXES = ("/static/",)
+_EXEMPT_PREFIXES = ("/static/", "/agent-upgrade-binary/")
 
 def _is_exempt(path: str) -> bool:
     return path in _EXEMPT_PATHS or path.startswith(_EXEMPT_PREFIXES)
@@ -98,20 +118,101 @@ def sign_reassignment(target_url: str) -> str:
                           sort_keys=True, separators=(",", ":")).encode()
     return base64.b64encode(_topology_key.sign(payload)).decode()
 
+# === Agent auto-upgrade (uses the same topology_private.key as reassignment —
+# same lower-trust tier: this key lives on the master and signs automatically,
+# never the buyer's offline exec key) ===
+MASTER_PUBLIC_HOST = "10.67.216.145"   # CONFIRM: reachable from agents' network. See patch header.
+MASTER_PUBLIC_PORT = 9000
+
+UPGRADES_DIR  = Path(__file__).parent / "upgrade_staging"
+UPGRADES_FILE = Path(__file__).parent / "upgrades.json"
+
+def _load_upgrades() -> list:
+    if not UPGRADES_FILE.exists():
+        return []
+    try:
+        return json.loads(UPGRADES_FILE.read_text())
+    except Exception:
+        return []
+
+def _save_upgrades(upgrades: list):
+    tmp = UPGRADES_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(upgrades, indent=2))
+    tmp.replace(UPGRADES_FILE)
+
+def sign_upgrade(version: str, download_url: str, sha256: str) -> str:
+    if _topology_key is None:
+        raise HTTPException(status_code=500,
+            detail="No topology_private.key on the master server — cannot sign upgrades.")
+    payload = json.dumps({
+        "type": "apply_upgrade", "version": version,
+        "download_url": download_url, "sha256": sha256,
+    }, sort_keys=True, separators=(",", ":")).encode()
+    return base64.b64encode(_topology_key.sign(payload)).decode()
+
+def sign_checkpoint_start(paths: list) -> str:
+    if _topology_key is None:
+        raise HTTPException(status_code=500,
+            detail="No topology_private.key on the master server — cannot sign checkpoints.")
+    payload = json.dumps({"type": "checkpoint_start", "paths": sorted(paths)},
+                          sort_keys=True, separators=(",", ":")).encode()
+    return base64.b64encode(_topology_key.sign(payload)).decode()
+
+def sign_checkpoint_list() -> str:
+    if _topology_key is None:
+        raise HTTPException(status_code=500,
+            detail="No topology_private.key on the master server -- cannot sign checkpoints.")
+    payload = json.dumps({"type": "checkpoint_list"},
+                          sort_keys=True, separators=(",", ":")).encode()
+    return base64.b64encode(_topology_key.sign(payload)).decode()
+
+def sign_checkpoint_action(action_type: str, checkpoint_id: str) -> str:
+    if _topology_key is None:
+        raise HTTPException(status_code=500,
+            detail="No topology_private.key on the master server — cannot sign checkpoints.")
+    payload = json.dumps({"type": action_type, "checkpoint_id": checkpoint_id},
+                          sort_keys=True, separators=(",", ":")).encode()
+    return base64.b64encode(_topology_key.sign(payload)).decode()
+
 _token_cache: dict[str, str] = {}  # floor url -> token
 
 FLOORS_SECRETS_FILE = Path(__file__).parent / "floors_secrets.json"
+FLOORS_SECRETS_KEY_FILE = Path(__file__).parent / "floors_secrets.key"
 
-def get_floors() -> list[dict]:
-    """floors.json holds only public topology (name, url). Credentials
-    live in floors_secrets.json (gitignored, not committed) and are
-    merged back in here at read time by matching on url."""
-    floors = json.loads(FLOORS_FILE.read_text())
+def _get_fernet() -> Fernet:
+    if not FLOORS_SECRETS_KEY_FILE.exists():
+        raise HTTPException(status_code=500,
+            detail="master/floors_secrets.key is missing — cannot decrypt floors_secrets.json.")
+    return Fernet(FLOORS_SECRETS_KEY_FILE.read_bytes())
+
+def _read_floors_secrets() -> list[dict]:
+    """floors_secrets.json is Fernet-encrypted at rest (gitignored, not committed);
+    the decryption key lives separately in floors_secrets.key (also gitignored)."""
     if not FLOORS_SECRETS_FILE.exists():
         raise HTTPException(status_code=500,
             detail="master/floors_secrets.json is missing. Floor credentials "
                    "must live there now (not in floors.json) - see floors_secrets.json.example.")
-    secrets_by_url = {s["url"]: s for s in json.loads(FLOORS_SECRETS_FILE.read_text())}
+    fernet = _get_fernet()
+    try:
+        plaintext = fernet.decrypt(FLOORS_SECRETS_FILE.read_bytes())
+    except InvalidToken:
+        raise HTTPException(status_code=500,
+            detail="Failed to decrypt floors_secrets.json — wrong key or corrupted file.")
+    return json.loads(plaintext)
+
+def _write_floors_secrets(secrets_list: list[dict]) -> None:
+    fernet = _get_fernet()
+    encrypted = fernet.encrypt(json.dumps(secrets_list, indent=2).encode())
+    tmp = FLOORS_SECRETS_FILE.with_suffix(".json.tmp")
+    tmp.write_bytes(encrypted)
+    tmp.replace(FLOORS_SECRETS_FILE)
+
+def get_floors() -> list[dict]:
+    """floors.json holds only public topology (name, url). Credentials
+    live in floors_secrets.json (encrypted at rest) and are merged back
+    in here at read time by matching on url."""
+    floors = json.loads(FLOORS_FILE.read_text())
+    secrets_by_url = {s["url"]: s for s in _read_floors_secrets()}
     merged = []
     for f in floors:
         s = secrets_by_url.get(f["url"])
@@ -139,6 +240,15 @@ async def get_token(client: httpx.AsyncClient, floor: dict) -> str:
     token = resp.json()["access_token"]
     _token_cache[floor["url"]] = token
     return token
+
+async def get_ws_token(floor: dict) -> str:
+    """Fetches a short-lived (45s) ws-dashboard token from a floor,
+    using the same cached bearer token as any other floor_request call.
+    A fresh one is fetched on every relay connect/reconnect, since these
+    expire quickly by design."""
+    resp = await floor_request(floor, "POST", "/api/auth/ws-token")
+    resp.raise_for_status()
+    return resp.json()["ws_token"]
 
 async def floor_request(floor: dict, method: str, path: str, **kwargs) -> httpx.Response:
     async with httpx.AsyncClient() as client:
@@ -187,6 +297,43 @@ async def fetch_floor_summary(client: httpx.AsyncClient, idx: int, floor: dict) 
             "pending_count": 0, "machines": [], "pending": [],
         }
 
+@app.post("/api/floors/admin/create")
+async def create_floor(body: dict = Body(...)):
+    name = body.get("name")
+    url = body.get("url")
+    username = body.get("username")
+    password = body.get("password")
+    if not all([name, url, username, password]):
+        raise HTTPException(status_code=400, detail="name, url, username, and password are all required")
+    url = url.rstrip("/")
+    floors = json.loads(FLOORS_FILE.read_text())
+    if any(f["url"].rstrip("/") == url for f in floors):
+        raise HTTPException(status_code=400, detail="A floor with this url already exists")
+    new_floor = {"name": name, "url": url}
+
+    floors_backup = FLOORS_FILE.with_name(f"floors.json.bak_{int(time.time())}")
+    floors_backup.write_text(FLOORS_FILE.read_text())
+    floors.append(new_floor)
+    tmp = FLOORS_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(floors, indent=2))
+    tmp.replace(FLOORS_FILE)
+
+    secrets_list = _read_floors_secrets() if FLOORS_SECRETS_FILE.exists() else []
+    if FLOORS_SECRETS_FILE.exists():
+        secrets_backup = FLOORS_SECRETS_FILE.with_name(f"floors_secrets.json.bak_{int(time.time())}")
+        secrets_backup.write_bytes(FLOORS_SECRETS_FILE.read_bytes())
+    secrets_list.append({"url": url, "username": username, "password": password})
+    _write_floors_secrets(secrets_list)
+
+    new_idx = len(floors) - 1
+    return {
+        "ok": True, "idx": new_idx, "name": name, "url": url,
+        "baked_trust": False,
+        "note": "This floor is not yet trusted for reassign_server by already-built agent "
+                "binaries until floors.json is rebaked (tools/bake_topology.py) and agents "
+                "are rebuilt.",
+    }
+
 @app.get("/api/aggregate")
 async def aggregate():
     floors = get_floors()
@@ -211,9 +358,14 @@ async def floor_machine_detail(idx: int, machine_id: int):
     return resp.json()
 
 @app.post("/api/floors/{idx}/machines/{machine_id}/approve")
-async def floor_approve(idx: int, machine_id: int):
+async def floor_approve(idx: int, machine_id: int, body: dict = Body(default={})):
     floor = get_floor(idx)
-    resp = await floor_request(floor, "POST", f"/api/machines/{machine_id}/approve")
+    payload = {}
+    target_idx = body.get("target_floor_idx")
+    if target_idx is not None:
+        target_floor = get_floor(target_idx)
+        payload["redirect_target_url"] = target_floor["url"]
+    resp = await floor_request(floor, "POST", f"/api/machines/{machine_id}/approve", json=payload)
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     return resp.json()
@@ -239,6 +391,132 @@ async def floor_command_status(idx: int, machine_id: int, cmd_id: int):
     floor = get_floor(idx)
     resp = await floor_request(floor, "GET", f"/api/machines/{machine_id}/command/{cmd_id}")
     if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.post("/api/upgrades")
+async def register_upgrade(body: dict = Body(...)):
+    """Registers a version already staged on disk at
+    master/upgrade_staging/<version>/<os_name>/<filename> (stage it there
+    first via cp + sha256sum — see the staging one-liner in chat). This
+    endpoint just records the metadata; it does not accept file uploads."""
+    version  = body.get("version")
+    os_name  = body.get("os_name")
+    filename = body.get("filename")
+    sha256   = body.get("sha256")
+    if not all([version, os_name, filename, sha256]):
+        raise HTTPException(status_code=400,
+            detail="version, os_name, filename, and sha256 are all required")
+    staged_path = UPGRADES_DIR / version / os_name / filename
+    if not staged_path.exists():
+        raise HTTPException(status_code=404,
+            detail=f"No file staged at {staged_path} — copy it there first, then register")
+    upgrades = _load_upgrades()
+    upgrades = [u for u in upgrades if not (u["version"] == version and u["os_name"] == os_name)]
+    upgrades.append({
+        "version": version, "os_name": os_name,
+        "filename": filename, "sha256": sha256,
+        "staged_at": time.time(),
+    })
+    _save_upgrades(upgrades)
+    return {"ok": True, "version": version, "os_name": os_name, "sha256": sha256}
+
+@app.get("/api/upgrades/latest")
+async def latest_upgrade(os_name: str = "linux"):
+    upgrades = [u for u in _load_upgrades() if u["os_name"] == os_name]
+    if not upgrades:
+        raise HTTPException(status_code=404, detail=f"No upgrade staged for os_name={os_name}")
+    return max(upgrades, key=lambda u: u["staged_at"])
+
+@app.get("/agent-upgrade-binary/{version}/{os_name}")
+async def download_upgrade_binary(version: str, os_name: str):
+    upgrades = _load_upgrades()
+    match = next((u for u in upgrades if u["version"] == version and u["os_name"] == os_name), None)
+    if not match:
+        raise HTTPException(status_code=404, detail="No such staged upgrade")
+    path = UPGRADES_DIR / version / os_name / match["filename"]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Staged file missing from disk")
+    return FileResponse(path, filename=match["filename"], media_type="application/octet-stream")
+
+@app.post("/api/floors/{idx}/machines/{machine_id}/approve-upgrade")
+async def floor_approve_upgrade(idx: int, machine_id: int, body: dict = Body(...)):
+    """Signs and dispatches an apply_upgrade command to one machine, same
+    flow as floor_reassign for reassign_server — this endpoint is exempt
+    from the /login session middleware requirement in the same way every
+    other /api/ route already is (handled by require_session)."""
+    floor = get_floor(idx)
+    version = body.get("version")
+    os_name = body.get("os_name", "linux")
+    if not version:
+        raise HTTPException(status_code=400, detail="version is required")
+    upgrades = _load_upgrades()
+    match = next((u for u in upgrades if u["version"] == version and u["os_name"] == os_name), None)
+    if not match:
+        raise HTTPException(status_code=404, detail="No such staged upgrade — register it via /api/upgrades first")
+
+    download_url = f"http://{MASTER_PUBLIC_HOST}:{MASTER_PUBLIC_PORT}/agent-upgrade-binary/{version}/{os_name}"
+    signature = sign_upgrade(version, download_url, match["sha256"])
+    resp = await floor_request(floor, "POST", f"/api/machines/{machine_id}/command", json={
+        "type": "apply_upgrade",
+        "params": {"version": version, "download_url": download_url, "sha256": match["sha256"]},
+        "signature": signature,
+    })
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.post("/api/floors/{idx}/machines/{machine_id}/checkpoint-restore")
+async def floor_checkpoint_restore(idx: int, machine_id: int, body: dict = Body(...)):
+    """'Reload Original State' — signs and dispatches a checkpoint_restore
+    command to one machine, same flow as floor_approve_upgrade."""
+    floor = get_floor(idx)
+    checkpoint_id = body.get("checkpoint_id")
+    if not checkpoint_id:
+        raise HTTPException(status_code=400, detail="checkpoint_id is required")
+    signature = sign_checkpoint_action("checkpoint_restore", checkpoint_id)
+    resp = await floor_request(floor, "POST", f"/api/machines/{machine_id}/command", json={
+        "type": "checkpoint_restore",
+        "params": {"checkpoint_id": checkpoint_id},
+        "signature": signature,
+    })
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.post("/api/floors/{idx}/machines/{machine_id}/checkpoint-discard")
+async def floor_checkpoint_discard(idx: int, machine_id: int, body: dict = Body(...)):
+    """'Keep Current State' — signs and dispatches a checkpoint_discard
+    command to one machine. No filesystem change; just clears the marker."""
+    floor = get_floor(idx)
+    checkpoint_id = body.get("checkpoint_id")
+    if not checkpoint_id:
+        raise HTTPException(status_code=400, detail="checkpoint_id is required")
+    signature = sign_checkpoint_action("checkpoint_discard", checkpoint_id)
+    resp = await floor_request(floor, "POST", f"/api/machines/{machine_id}/command", json={
+        "type": "checkpoint_discard",
+        "params": {"checkpoint_id": checkpoint_id},
+        "signature": signature,
+    })
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.post("/api/floors/{idx}/machines/{machine_id}/checkpoint-list")
+async def floor_checkpoint_list(idx: int, machine_id: int):
+    """Dispatches a checkpoint_list command so the cleanup popup can show
+    existing checkpoints with real sizes before the admin picks one to
+    discard via the already-existing checkpoint-discard route. Returns
+    {cmd_id}; caller polls the existing command-status route until
+    status is done/failed, then JSON.parses output."""
+    floor = get_floor(idx)
+    signature = sign_checkpoint_list()
+    resp = await floor_request(floor, "POST", f"/api/machines/{machine_id}/command", json={
+        "type": "checkpoint_list",
+        "params": {},
+        "signature": signature,
+    })
+    if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     return resp.json()
 
@@ -449,6 +727,21 @@ async def aggregate_fleet_command(body: dict = Body(...)):
     failed = sum(r.get("failed", 0) for r in results if r["ok"]) + sum(1 for r in results if not r["ok"])
 
     return {"ok": True, "total": total, "sent": sent, "failed": failed, "per_floor": results}
+
+@app.post("/api/fleet/checkpoint-start")
+async def fleet_checkpoint_start(body: dict = Body(...)):
+    """Fleet-wide 'Start Checkpoint' — signs once, then dispatches a
+    checkpoint_start to every ONLINE machine (or an explicit targets
+    subset), reusing aggregate_fleet_command directly so this never does
+    a per-machine HTTP fan-out from master."""
+    extra_paths = body.get("paths", [])
+    signature = sign_checkpoint_start(extra_paths)
+    return await aggregate_fleet_command({
+        "type": "checkpoint_start",
+        "params": {"paths": extra_paths},
+        "signature": signature,
+        "targets": body.get("targets"),
+    })
 
 @app.get("/api/floors/{idx}/install-command")
 async def floor_install_command(idx: int):

@@ -3,37 +3,35 @@ Built by Aaditya Singh - aadisingh0121@gmail.com
 
 ## Method 1 - One-Line Installer (Recommended)
 
-    curl -sSL http://YOUR_SERVER:8000/install.sh | bash -s -- --server http://YOUR_SERVER:8000
+    curl -sSL http://YOUR_SERVER:8000/install | bash
 
-Replace YOUR_SERVER with your JENIX server IP or hostname.
+Replace YOUR_SERVER:8000 with your JENIX server's real address.
+
+The installer will interactively ask for your server address if it isn't
+already set. To skip the prompt (e.g. for scripted/unattended installs),
+set the JENIX_SERVER environment variable before running it:
+
+    JENIX_SERVER=http://YOUR_SERVER:8000 curl -sSL http://YOUR_SERVER:8000/install | bash
+
+To pre-assign the new machine to a specific site at install time (optional,
+for MSP multi-client setups), also set JENIX_SITE_ID:
+
+    JENIX_SERVER=http://YOUR_SERVER:8000 JENIX_SITE_ID=3 curl -sSL http://YOUR_SERVER:8000/install | bash
+
+The installer detects your OS automatically and downloads the correct
+pre-built agent binary directly from your JENIX server - no separate
+binary distribution step is needed.
 
 ## Method 2 - Manual Installation
 
-Step 1 - Install Python dependencies
-    pip3 install psutil websockets --break-system-packages
+There is currently no separate raw-source manual install path - the
+one-line installer above IS the supported install method. If you want to
+inspect the installer before running it (recommended for security-conscious
+environments), download and read it first:
 
-Step 2 - Create agent directory
-    sudo mkdir -p /opt/jenix-agent
-    sudo chown $USER:$USER /opt/jenix-agent
-
-Step 3 - Download agent files
-    SERVER=http://YOUR_SERVER:8000
-    curl -sSL $SERVER/static/agent.py     -o /opt/jenix-agent/agent.py
-    curl -sSL $SERVER/static/collector.py -o /opt/jenix-agent/collector.py
-    curl -sSL $SERVER/static/executor.py  -o /opt/jenix-agent/executor.py
-
-Step 4 - Run agent manually to test
-    cd /opt/jenix-agent
-    JENIX_SERVER=http://YOUR_SERVER:8000 python3 agent.py
-
-You should see:
-    [agent] Registering with server...
-    [agent] Registered - machine_id=1
-    [agent] Connected
-
-Step 5 - Install as systemd service
-    sudo systemctl enable jenix-agent
-    sudo systemctl start jenix-agent
+    curl -sSL http://YOUR_SERVER:8000/install -o install_jenix.sh
+    less install_jenix.sh
+    bash install_jenix.sh
 
 ## Troubleshooting
 
@@ -45,13 +43,20 @@ Remove agent:
     sudo systemctl stop jenix-agent
     sudo systemctl disable jenix-agent
     sudo rm /etc/systemd/system/jenix-agent.service
-    sudo rm -rf /opt/jenix-agent
     rm -rf ~/.jenix
 
-## Supported OS
+## Supported OS (today)
 - Ubuntu 20.04+
 - Linux Mint 21+
 - Debian 11+
 - CentOS 8+
 - Fedora 36+
 - Raspberry Pi OS
+
+## Coming Soon
+- Windows (native one-line PowerShell installer - in active development)
+- macOS (native one-line installer - in active development)
+
+Both are being built and tested on real hardware before release; they are
+not yet available in this build. Attempting the Windows installer script
+included in this repo will not currently succeed end-to-end.

@@ -10,6 +10,7 @@ const NAV_GROUPS = [
       { path: "/",        label: "Fleet Command",  icon: "◈", badge: null },
       { path: "/overview",label: "All Machines",   icon: "⬡", badge: null },
       { path: "/uptime",  label: "Uptime Monitor", icon: "◎", badge: null },
+      { path: "/sites",   label: "Sites",          icon: "▣", badge: null },
     ]
   },
   {
