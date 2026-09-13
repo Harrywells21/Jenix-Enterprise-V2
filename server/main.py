@@ -126,6 +126,19 @@ def installer():
         raise HTTPException(status_code=404, detail="Installer script not found on server")
     return FileResponse(installer_path, media_type="text/x-sh", filename="install_jenix.sh")
 
+@app.get("/install/windows")
+def installer_windows():
+    """Serves the Windows PowerShell installer (install_jenix.ps1, repo
+    root), mirroring GET /install for Linux/macOS. Real, working route --
+    added to replace install_jenix.sh's old dead /api/agent/install/windows
+    fallback reference."""
+    from fastapi.responses import FileResponse
+    from fastapi import HTTPException
+    installer_path = os.path.join(os.path.dirname(__file__), "..", "install_jenix.ps1")
+    if not os.path.exists(installer_path):
+        raise HTTPException(status_code=404, detail="Windows installer script not found on server")
+    return FileResponse(installer_path, media_type="text/plain", filename="install_jenix.ps1")
+
 @app.get("/agent-binary/{os_name}")
 def agent_binary(os_name: str):
     """Serves pre-built agent binaries so install_jenix.sh can download the

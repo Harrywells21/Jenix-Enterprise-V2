@@ -1,94 +1,80 @@
 # JENIX Enterprise — Windows Universal Installer
-# Run in PowerShell as Administrator
-
 $ErrorActionPreference = 'Stop'
-$RELEASES = "https://github.com/Harrywells21/Jenix-Enterprise-V2/releases/download/v1.0.0"
-$DIR = "$env:LOCALAPPDATA\JenixAgent"
 
-Write-Host ""
-Write-Host "╔══════════════════════════════════════════════╗" -f Cyan
-Write-Host "║     JENIX Enterprise — Universal Installer   ║" -f Cyan  
-Write-Host "╚══════════════════════════════════════════════╝" -f Cyan
-Write-Host ""
-
-# Step 1 - Detect Windows
-Write-Host "[1/5] Detected OS: Windows $([System.Environment]::OSVersion.Version)" -f Green
-
-# Step 2 - Check Python
-Write-Host "[2/5] Checking Python..." -f Yellow
-$python = $null
-foreach ($p in @("python","python3","py")) {
-    try { $v=& $p --version 2>&1; if($v -match "Python 3"){$python=$p;break} } catch {}
+if (-not $env:JENIX_SERVER) {
+    Write-Error "JENIX_SERVER is not set. Run as: `$env:JENIX_SERVER='http://YOUR_SERVER:8000'; iwr -useb `$env:JENIX_SERVER/install/windows | iex"
+    exit 1
 }
-if (-not $python) {
-    Write-Host "      Installing Python 3.11..." -f Yellow
-    $tmp="$env:TEMP\py.exe"
-    Invoke-WebRequest "https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe" -OutFile $tmp
-    Start-Process $tmp -Args "/quiet InstallAllUsers=1 PrependPath=1 Include_pip=1" -Wait
-    $env:PATH=[System.Environment]::GetEnvironmentVariable("PATH","Machine")
-    $python="python"
-    Write-Host "      Python installed!" -f Green
-} else {
-    Write-Host "      Found: $( & $python --version 2>&1 )" -f Green
+$InstallUrl = "$($env:JENIX_SERVER)/install/windows"
+
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "Administrator rights required -- requesting elevation..."
+    $siteEnv = if ($env:JENIX_SITE_ID) { "`$env:JENIX_SITE_ID='$($env:JENIX_SITE_ID)'; " } else { "" }
+    $relaunch = "`$env:JENIX_SERVER='$($env:JENIX_SERVER)'; $siteEnv" + "iwr -useb '$InstallUrl' | iex"
+    Start-Process powershell.exe -Verb RunAs -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-Command',$relaunch)
+    exit
 }
 
-# Step 3 - Install dependencies
-Write-Host "[3/5] Installing dependencies..." -f Yellow
-& $python -m pip install websockets psutil requests --quiet
-Write-Host "      Done!" -f Green
+$JenixDir = "$env:ProgramData\JENIX"
+$LogsDir  = "$JenixDir\logs"
+New-Item -ItemType Directory -Force -Path $JenixDir | Out-Null
+New-Item -ItemType Directory -Force -Path $LogsDir  | Out-Null
 
-# Step 4 - Download agent
-Write-Host "[4/5] Downloading JENIX Agent..." -f Yellow
-New-Item -ItemType Directory -Force -Path $DIR | Out-Null
-try {
-    Invoke-WebRequest "$RELEASES/JenixAgent-windows.exe" -OutFile "$DIR\JenixAgent.exe"
-} catch {
-    # Fallback: download Python script version
-    Invoke-WebRequest "$RELEASES/jenix_agent.py" -OutFile "$DIR\jenix_agent.py"
-    Write-Host "      Using Python script version" -f Yellow
-}
-Write-Host "      Downloaded!" -f Green
-
-# Step 5 - Desktop shortcut + auto-start
-Write-Host "[5/5] Setting up shortcuts..." -f Yellow
-
-# Desktop shortcut
-$WshShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\JENIX Agent.lnk")
-if (Test-Path "$DIR\JenixAgent.exe") {
-    $Shortcut.TargetPath = "$DIR\JenixAgent.exe"
-} else {
-    $Shortcut.TargetPath = $python
-    $Shortcut.Arguments = "$DIR\jenix_agent.py"
-}
-$Shortcut.Description = "JENIX Enterprise Agent"
-$Shortcut.Save()
-
-# Auto-start on login
-$regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-if (Test-Path "$DIR\JenixAgent.exe") {
-    Set-ItemProperty -Path $regPath -Name "JenixAgent" -Value "$DIR\JenixAgent.exe"
-} else {
-    Set-ItemProperty -Path $regPath -Name "JenixAgent" -Value "$python `"$DIR\jenix_agent.py`""
-}
-
-Write-Host ""
-Write-Host "╔══════════════════════════════════════════════╗" -f Green
-Write-Host "║   ✅ JENIX Agent Installed!                  ║" -f Green
-Write-Host "║                                              ║" -f Green
-Write-Host "║   • Desktop shortcut created                 ║" -f Green
-Write-Host "║   • Starts automatically on Windows login    ║" -f Green
-Write-Host "║   • Double-click 'JENIX Agent' on Desktop    ║" -f Green
-Write-Host "╚══════════════════════════════════════════════╝" -f Green
-Write-Host ""
-
-# Launch now
-$launch = Read-Host "Launch JENIX Agent now? [Y/n]"
-if ($launch -ne 'n' -and $launch -ne 'N') {
-    if (Test-Path "$DIR\JenixAgent.exe") {
-        Start-Process "$DIR\JenixAgent.exe"
-    } else {
-        Start-Process $python -ArgumentList "$DIR\jenix_agent.py" -WindowStyle Normal
+Write-Host "[1/5] Preparing NSSM (Windows service wrapper)..."
+$NssmExe = "$JenixDir\nssm.exe"
+if (-not (Test-Path $NssmExe)) {
+    try {
+        $zipPath = "$env:TEMP\nssm.zip"
+        Invoke-WebRequest "https://nssm.cc/release/nssm-2.24.zip" -OutFile $zipPath
+        Expand-Archive -Path $zipPath -DestinationPath "$env:TEMP\nssm_extract" -Force
+        Copy-Item "$env:TEMP\nssm_extract\nssm-2.24\win64\nssm.exe" -Destination $NssmExe -Force
+        Remove-Item $zipPath, "$env:TEMP\nssm_extract" -Recurse -Force
+    } catch {
+        Write-Error "Failed to download/extract NSSM: $_"
+        exit 1
     }
-    Write-Host "✓ JENIX Agent launched!" -f Green
+} else {
+    Write-Host "      Found existing $NssmExe"
 }
+
+Write-Host "[2/5] Downloading JENIX Agent from $($env:JENIX_SERVER)..."
+$AgentExe = "$JenixDir\JenixAgent-windows.exe"
+try {
+    Invoke-WebRequest "$($env:JENIX_SERVER)/agent-binary/windows" -OutFile $AgentExe
+} catch {
+    Write-Error "Failed to download agent binary from $($env:JENIX_SERVER)/agent-binary/windows: $_"
+    exit 1
+}
+
+Write-Host "[3/5] Writing server configuration..."
+Set-Content -Path "$JenixDir\server_url" -Value $env:JENIX_SERVER -NoNewline
+if ($env:JENIX_SITE_ID) {
+    Set-Content -Path "$JenixDir\site_id" -Value $env:JENIX_SITE_ID -NoNewline
+}
+
+Write-Host "[4/5] Registering Windows Service via NSSM..."
+& $NssmExe status JenixAgent 2>$null | Out-Null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "      Existing JenixAgent service found -- stopping and removing for a clean reinstall..."
+    & $NssmExe stop JenixAgent 2>$null | Out-Null
+    & $NssmExe remove JenixAgent confirm 2>$null | Out-Null
+}
+& $NssmExe install JenixAgent $AgentExe
+& $NssmExe set JenixAgent AppDirectory $JenixDir
+& $NssmExe set JenixAgent DisplayName "JENIX Agent"
+& $NssmExe set JenixAgent ObjectName LocalSystem
+& $NssmExe set JenixAgent Start SERVICE_AUTO_START
+& $NssmExe set JenixAgent AppExit Default Restart
+& $NssmExe set JenixAgent AppEnvironmentExtra "JENIX_SERVER=$($env:JENIX_SERVER)"
+& $NssmExe set JenixAgent AppStdout "$LogsDir\agent.log"
+& $NssmExe set JenixAgent AppStderr "$LogsDir\agent.log"
+
+Write-Host "[5/5] Starting service..."
+& $NssmExe start JenixAgent
+Start-Sleep -Seconds 2
+$status = & $NssmExe status JenixAgent
+Write-Host ""
+Write-Host "JENIX Agent installed. Service status: $status"
+Write-Host "Config/logs: $JenixDir"
+Write-Host "It will register with $($env:JENIX_SERVER) and appear in the dashboard once approved."

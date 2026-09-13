@@ -296,6 +296,67 @@ PLIST
     fi
     ;;
 
+# ── Windows (Git Bash / MSYS2) ─────────────────────────────────────────────────
+windows)
+    echo "[2/5] Preparing NSSM (Windows service wrapper)..."
+    mkdir -p ~/.jenix
+    NSSM_EXE="$HOME/.jenix/nssm.exe"
+    if [ ! -f "$NSSM_EXE" ]; then
+        if ! curl -sf -o /tmp/nssm.zip "https://nssm.cc/release/nssm-2.24.zip"; then
+            echo "      ERROR: failed to download NSSM from nssm.cc"
+            exit 1
+        fi
+        if ! command -v unzip &>/dev/null; then
+            echo "      ERROR: '\''unzip'\'' not found in this shell -- required to extract NSSM."
+            exit 1
+        fi
+        # nssm-2.24.zip layout is nssm-2.24/win64/nssm.exe and nssm-2.24/win32/nssm.exe.
+        # win64 assumed -- 32-bit Windows targets are not handled by this installer.
+        unzip -o -j /tmp/nssm.zip "nssm-2.24/win64/nssm.exe" -d "$HOME/.jenix" || {
+            echo "      ERROR: failed to extract nssm.exe from the downloaded zip"
+            exit 1
+        }
+        rm -f /tmp/nssm.zip
+    else
+        echo "      Found existing $NSSM_EXE"
+    fi
+
+    echo "[3/5] Installing JENIX Agent..."
+    mkdir -p ~/.jenix/logs
+    if ! curl -sf "$JENIX_SERVER/agent-binary/windows" -o ~/.jenix/JenixAgent-windows.exe; then
+        echo "      ERROR: failed to download agent binary from $JENIX_SERVER/agent-binary/windows"
+        echo "      (No real Windows agent binary has been built on the server yet -- this is"
+        echo "       expected to fail until that is done.)"
+        exit 1
+    fi
+    echo "$JENIX_SERVER" > ~/.jenix/server_url
+
+    echo "[4/5] Registering Windows Service via NSSM..."
+    "$NSSM_EXE" install JenixAgent "$HOME/.jenix/JenixAgent-windows.exe"
+    "$NSSM_EXE" set JenixAgent AppDirectory "$HOME/.jenix"
+    "$NSSM_EXE" set JenixAgent DisplayName "JENIX Agent"
+    "$NSSM_EXE" set JenixAgent ObjectName LocalSystem
+    "$NSSM_EXE" set JenixAgent Start SERVICE_AUTO_START
+    "$NSSM_EXE" set JenixAgent AppExit Default Restart
+    "$NSSM_EXE" set JenixAgent AppEnvironmentExtra "JENIX_SERVER=$JENIX_SERVER"
+    "$NSSM_EXE" set JenixAgent AppStdout "$HOME/.jenix/logs/agent.log"
+    "$NSSM_EXE" set JenixAgent AppStderr "$HOME/.jenix/logs/agent.log"
+
+    echo "[5/5] Starting service..."
+    "$NSSM_EXE" start JenixAgent
+
+    echo ""
+    echo "╔══════════════════════════════════════════════╗"
+    echo "║   ✅ JENIX Agent Installed!                  ║"
+    echo "║                                              ║"
+    echo "║   • Running as a Windows Service (NSSM)      ║"
+    echo "║   • Auto-starts on boot, auto-restarts       ║"
+    echo "║   • Connected to: $JENIX_SERVER"
+    echo "║   • Logs: ~/.jenix/logs/agent.log            ║"
+    echo "╚══════════════════════════════════════════════╝"
+    echo ""
+    ;;
+
 # ── Unknown ───────────────────────────────────────────────────────────────────
 *)
     echo ""
@@ -305,6 +366,6 @@ PLIST
     echo "included in this package, or contact support."
     echo ""
     echo "Windows users: Run this in PowerShell (Admin):"
-    echo "  iwr -useb http://YOUR_SERVER:8000/api/agent/install/windows | iex"
+    echo "  \$env:JENIX_SERVER='http://YOUR_SERVER:8000'; iwr -useb \$env:JENIX_SERVER/install/windows | iex"
     ;;
 esac

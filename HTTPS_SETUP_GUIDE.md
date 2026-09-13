@@ -24,7 +24,7 @@ Then update dashboard api/index.js BASE to use https and wss.
 ## After Enabling HTTPS
 
 Update agent installations:
-    curl -sSL https://YOUR_SERVER/install.sh | bash -s -- --server https://YOUR_SERVER
+    curl -sSL https://YOUR_SERVER/install | bash -s -- --server https://YOUR_SERVER
 
 Update agent .env:
     JENIX_SERVER=https://YOUR_SERVER

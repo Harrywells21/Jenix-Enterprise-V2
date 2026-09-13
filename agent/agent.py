@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
-import asyncio, json, os, sys, signal
+import asyncio, json, os, sys, signal, platform
 import websockets
 from pathlib import Path
 
-TOKEN_FILE   = Path.home() / ".jenix" / "agent.token"
-MACHINE_FILE = Path.home() / ".jenix" / "agent.machine_id"
-SERVER_FILE  = Path.home() / ".jenix" / "server_url"
-SITE_FILE    = Path.home() / ".jenix" / "site_id"
+def _config_dir() -> Path:
+    # Windows: use %ProgramData%\JENIX, never a user-home-relative path.
+    # This matters because the Windows agent runs as a LocalSystem NSSM
+    # service, whose "home" resolves to a different, unrelated profile
+    # directory than any real user's -- a real, confirmed root cause of
+    # the Windows registration bug (see project notes). Linux/macOS are
+    # unaffected and keep the existing ~/.jenix behavior.
+    if platform.system() == "Windows":
+        base = os.environ.get("ProgramData", r"C:\ProgramData")
+        return Path(base) / "JENIX"
+    return Path.home() / ".jenix"
+
+_CONFIG_DIR  = _config_dir()
+TOKEN_FILE   = _CONFIG_DIR / "agent.token"
+MACHINE_FILE = _CONFIG_DIR / "agent.machine_id"
+SERVER_FILE  = _CONFIG_DIR / "server_url"
+SITE_FILE    = _CONFIG_DIR / "site_id"
 def _load_server_url() -> str:
     env = os.getenv("JENIX_SERVER")
     if env:
@@ -121,7 +134,7 @@ async def run_agent(token: str):
                 "os_pretty": info.get("os_pretty", info.get("os_type", "Linux")),
             }
         }))
-        print("[agent] Register message sent ✅")
+        print("[agent] Register message sent")
         print(f"[AGENTDEBUG] register sent t={_t.time():.3f}")
 
         # Capture the running event loop here — in the async context
@@ -258,7 +271,17 @@ async def _run_with_signal_handling():
         main_task.cancel()
 
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, _request_shutdown)
+        try:
+            loop.add_signal_handler(sig, _request_shutdown)
+        except NotImplementedError:
+            # loop.add_signal_handler is not implemented on Windows (real,
+            # documented asyncio/Python limitation -- not a bug here).
+            # Without this except, agent.py crashes immediately on Windows
+            # before ever registering or connecting. Graceful signal-based
+            # shutdown genuinely isn't available there: Windows process
+            # termination (e.g. by NSSM) bypasses Python-catchable signals
+            # regardless of this handler -- disclosed, not silently patched.
+            pass
 
     try:
         await main_task
