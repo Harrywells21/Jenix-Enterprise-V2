@@ -1,9 +1,9 @@
 """
 JENIX Fleet Analytics — powers the executive dashboard.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
-from db import get_db, Machine, Metric, Alert, Command, AuditLog, CveScan, CveFinding, compute_audit_hash
+from db import get_db, Machine, Metric, Alert, Command, AuditLog, CveScan, CveFinding, compute_audit_hash, User
 from auth import get_current_user, User
 from health_score import calculate_health_score, calculate_compliance_score, SEV_ORDER
 from datetime import datetime, timedelta
@@ -193,6 +193,7 @@ def all_alerts(db: Session = Depends(get_db),
                .order_by(Alert.timestamp.desc())\
                .limit(100).all()
     machines = {m.id: m.hostname for m in db.query(Machine).all()}
+    users = {u.id: u.name for u in db.query(User).all()}
     return [{
         "id":         a.id,
         "machine_id": a.machine_id,
@@ -201,8 +202,49 @@ def all_alerts(db: Session = Depends(get_db),
         "type":       a.type,
         "message":    a.message,
         "is_read":    a.is_read,
+        "status":     a.status or "open",
+        "assigned_to_user_id": a.assigned_to_user_id,
+        "assigned_to": users.get(a.assigned_to_user_id) if a.assigned_to_user_id else None,
+        "updated_at": a.updated_at.isoformat() if a.updated_at else None,
         "timestamp":  a.timestamp.isoformat(),
     } for a in alerts]
+
+ALLOWED_ALERT_STATUSES = {"open", "investigating", "acknowledged", "resolved", "snoozed"}
+
+@router.patch("/alerts/{alert_id}/status")
+def set_alert_status(alert_id: int, body: dict = Body(...),
+                     db: Session = Depends(get_db),
+                     _:  User    = Depends(get_current_user)):
+    new_status = body.get("status")
+    if new_status not in ALLOWED_ALERT_STATUSES:
+        raise HTTPException(status_code=400,
+            detail=f"status must be one of {sorted(ALLOWED_ALERT_STATUSES)}")
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    alert.status = new_status
+    alert.updated_at = datetime.utcnow()
+    if new_status in ("acknowledged", "investigating"):
+        alert.is_read = True
+    db.commit()
+    return {"ok": True, "id": alert_id, "status": new_status}
+
+@router.patch("/alerts/{alert_id}/assign")
+def assign_alert(alert_id: int, body: dict = Body(...),
+                 db: Session = Depends(get_db),
+                 current_user: User = Depends(get_current_user)):
+    user_id = body.get("user_id", current_user.id)  # default: assign to whoever calls this
+    if user_id is not None:
+        target = db.query(User).filter(User.id == user_id).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found")
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    alert.assigned_to_user_id = user_id
+    alert.updated_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True, "id": alert_id, "assigned_to_user_id": user_id}
 
 @router.post("/alerts/mark-all-read")
 def mark_all_read(db: Session = Depends(get_db),

@@ -6,7 +6,7 @@ import asyncio, os, shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
-BACKUP_DIR = Path.home() / ".jenix" / "backups"
+BACKUP_DIR = Path(__file__).parent / "backups"
 DB_PATH    = Path(__file__).parent / "jenix.db"
 MAX_BACKUPS = 7
 
@@ -42,6 +42,22 @@ def backup_now() -> str:
     size_kb = dest.stat().st_size / 1024
     return str(dest)
 
+def _backup_created_at(b) -> str:
+    """Real backup creation time comes from the filename itself
+    (jenix_YYYYMMDD_HHMMSS.db) — file mtime is NOT reliable here
+    since backup_now() uses shutil.copy2, which preserves the
+    SOURCE db's mtime on the copy rather than stamping the actual
+    backup time. Falls back to mtime only if a filename doesn't
+    match the expected pattern (e.g. a hand-renamed file)."""
+    stem = b.stem  # "jenix_20260914_111137"
+    parts = stem.split("_")
+    if len(parts) == 3:
+        try:
+            return datetime.strptime(parts[1] + "_" + parts[2], "%Y%m%d_%H%M%S").isoformat()
+        except ValueError:
+            pass
+    return datetime.fromtimestamp(b.stat().st_mtime).isoformat()
+
 def list_backups() -> list:
     """List all available backups."""
     if not BACKUP_DIR.exists():
@@ -51,8 +67,7 @@ def list_backups() -> list:
         "filename": b.name,
         "path":     str(b),
         "size_kb":  round(b.stat().st_size / 1024, 1),
-        "created":  datetime.fromtimestamp(
-            b.stat().st_mtime).isoformat(),
+        "created":  _backup_created_at(b),
     } for b in backups]
 
 def restore_backup(filename: str) -> bool:

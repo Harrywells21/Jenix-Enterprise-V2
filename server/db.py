@@ -241,6 +241,9 @@ class Alert(Base):
     message    = Column(Text, nullable=False)
     is_read    = Column(Boolean, default=False)
     timestamp  = Column(DateTime, default=datetime.utcnow)
+    status     = Column(String, default="open")  # open / investigating / acknowledged / resolved / snoozed
+    assigned_to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, nullable=True)
     machine    = relationship("Machine", back_populates="alerts")
 
 
@@ -322,6 +325,20 @@ def _migrate_schema():
             conn.exec_driver_sql("ALTER TABLE reports ADD COLUMN report_type VARCHAR DEFAULT 'single'")
             conn.commit()
             print("✅ Migrated: added reports.report_type")
+
+        alert_cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(alerts)").fetchall()]
+        if "status" not in alert_cols:
+            conn.exec_driver_sql("ALTER TABLE alerts ADD COLUMN status VARCHAR DEFAULT 'open'")
+            conn.commit()
+            print("Migrated: added alerts.status")
+        if "assigned_to_user_id" not in alert_cols:
+            conn.exec_driver_sql("ALTER TABLE alerts ADD COLUMN assigned_to_user_id INTEGER")
+            conn.commit()
+            print("Migrated: added alerts.assigned_to_user_id")
+        if "updated_at" not in alert_cols:
+            conn.exec_driver_sql("ALTER TABLE alerts ADD COLUMN updated_at DATETIME")
+            conn.commit()
+            print("Migrated: added alerts.updated_at")
 
 
 def backfill_audit_hashes():

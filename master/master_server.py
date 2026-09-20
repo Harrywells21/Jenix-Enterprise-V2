@@ -635,6 +635,72 @@ async def aggregate_mark_all_read():
     results = await asyncio.gather(*[mark(f) for f in floors])
     return {"ok": all(results)}
 
+@app.patch("/api/floors/{idx}/alerts/{alert_id}/status")
+async def floor_set_alert_status(idx: int, alert_id: int, body: dict = Body(...)):
+    floor = get_floor(idx)
+    resp = await floor_request(floor, "PATCH", f"/api/analytics/alerts/{alert_id}/status", json=body)
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.patch("/api/floors/{idx}/alerts/{alert_id}/assign")
+async def floor_assign_alert(idx: int, alert_id: int, body: dict = Body(default={})):
+    floor = get_floor(idx)
+    resp = await floor_request(floor, "PATCH", f"/api/analytics/alerts/{alert_id}/assign", json=body)
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.get("/api/analytics/fleet/compliance-score")
+async def aggregate_compliance_score():
+    floors = get_floors()
+    async with httpx.AsyncClient() as client:
+        async def fetch(idx, floor):
+            try:
+                score_resp = await floor_request(floor, "GET", "/api/analytics/fleet/compliance-score")
+                score_resp.raise_for_status()
+                score_data = score_resp.json()
+                fleet_resp = await floor_request(floor, "GET", "/api/analytics/fleet")
+                fleet_resp.raise_for_status()
+                total = fleet_resp.json()["total"]
+                return idx, floor, score_data, total, None
+            except Exception as e:
+                return idx, floor, None, 0, str(e)
+        results = await asyncio.gather(*[fetch(i, f) for i, f in enumerate(floors)])
+
+    ok_results = [(idx, floor, data, total) for idx, floor, data, total, err in results if data is not None]
+    errors = [{"idx": idx, "name": floor["name"], "error": err}
+              for idx, floor, data, total, err in results if err]
+
+    weight_total = sum(total for _, _, _, total in ok_results)
+    weighted_score = round(
+        sum(d["score"] * total for _, _, d, total in ok_results) / weight_total, 1
+    ) if weight_total > 0 else 0
+
+    combined_cve = {}
+    for _, _, d, _ in ok_results:
+        for sev, count in d["cve_severity_counts"].items():
+            combined_cve[sev] = combined_cve.get(sev, 0) + count
+
+    combined_unresolved = {"critical": 0, "warning": 0}
+    for _, _, d, _ in ok_results:
+        combined_unresolved["critical"] += d["unresolved_alerts"].get("critical", 0)
+        combined_unresolved["warning"]  += d["unresolved_alerts"].get("warning", 0)
+
+    floors_breakdown = [{
+        "floor_idx": idx, "floor_name": floor["name"],
+        "score": d["score"], "grade": d["grade"], "color": d["color"],
+        "breakdown": d["breakdown"],
+    } for idx, floor, d, total in ok_results]
+
+    return {
+        "score": weighted_score,
+        "cve_severity_counts": combined_cve,
+        "unresolved_alerts": combined_unresolved,
+        "floors": floors_breakdown,
+        "floor_errors": errors,
+    }
+
 @app.get("/api/analytics/savings")
 async def aggregate_savings():
     floors = get_floors()
@@ -823,6 +889,162 @@ async def floor_delete_schedule(idx: int, schedule_id: int):
 async def floor_toggle_schedule(idx: int, schedule_id: int):
     floor = get_floor(idx)
     resp = await floor_request(floor, "PATCH", f"/api/schedules/{schedule_id}/toggle")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+# ============================================================
+# SETTINGS — Whitelabel (master-authoritative, synced to both
+# floors), Backup (aggregate + per-floor action), Sites (real
+# consolidated list merging both floors, actions floor-scoped)
+# ============================================================
+
+@app.get("/api/whitelabel")
+async def get_whitelabel():
+    floors = get_floors()
+    if not floors:
+        raise HTTPException(status_code=500, detail="No floors configured")
+    resp = await floor_request(floors[0], "GET", "/api/whitelabel")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.post("/api/whitelabel")
+async def update_whitelabel(body: dict = Body(...)):
+    floors = get_floors()
+    if not floors:
+        raise HTTPException(status_code=500, detail="No floors configured")
+    async def push(idx, floor):
+        try:
+            resp = await floor_request(floor, "POST", "/api/whitelabel", json=body)
+            resp.raise_for_status()
+            return {"floor_idx": idx, "floor_name": floor["name"], "ok": True}
+        except Exception as e:
+            return {"floor_idx": idx, "floor_name": floor["name"], "ok": False, "error": str(e)}
+    results = await asyncio.gather(*[push(i, f) for i, f in enumerate(floors)])
+    if not all(r["ok"] for r in results):
+        raise HTTPException(status_code=207, detail={"message": "Whitelabel update partially failed", "results": results})
+    return {"ok": True, "results": results}
+
+@app.post("/api/whitelabel/reset")
+async def reset_whitelabel():
+    floors = get_floors()
+    async def push(idx, floor):
+        try:
+            resp = await floor_request(floor, "POST", "/api/whitelabel/reset")
+            resp.raise_for_status()
+            return {"floor_idx": idx, "floor_name": floor["name"], "ok": True}
+        except Exception as e:
+            return {"floor_idx": idx, "floor_name": floor["name"], "ok": False, "error": str(e)}
+    results = await asyncio.gather(*[push(i, f) for i, f in enumerate(floors)])
+    if not all(r["ok"] for r in results):
+        raise HTTPException(status_code=207, detail={"message": "Whitelabel reset partially failed", "results": results})
+    return {"ok": True, "results": results}
+
+@app.get("/api/analytics/backups")
+async def aggregate_backups():
+    floors = get_floors()
+    async def fetch(idx, floor):
+        try:
+            resp = await floor_request(floor, "GET", "/api/backup/list")
+            resp.raise_for_status()
+            return [{**b, "floor_idx": idx, "floor_name": floor["name"]} for b in resp.json()]
+        except Exception:
+            return []
+    results = await asyncio.gather(*[fetch(i, f) for i, f in enumerate(floors)])
+    return [b for floor_backups in results for b in floor_backups]
+
+@app.post("/api/floors/{idx}/backup/create")
+async def floor_create_backup(idx: int):
+    floor = get_floor(idx)
+    resp = await floor_request(floor, "POST", "/api/backup/create")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.post("/api/floors/{idx}/backup/restore/{filename}")
+async def floor_restore_backup(idx: int, filename: str):
+    floor = get_floor(idx)
+    resp = await floor_request(floor, "POST", f"/api/backup/restore/{filename}")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.post("/api/backup/all")
+async def backup_all_floors():
+    floors = get_floors()
+    async def do_backup(idx, floor):
+        try:
+            resp = await floor_request(floor, "POST", "/api/backup/create")
+            resp.raise_for_status()
+            return {"floor_idx": idx, "floor_name": floor["name"], "ok": True, **resp.json()}
+        except Exception as e:
+            return {"floor_idx": idx, "floor_name": floor["name"], "ok": False, "error": str(e)}
+    results = await asyncio.gather(*[do_backup(i, f) for i, f in enumerate(floors)])
+    return {"results": results}
+
+@app.get("/api/sites")
+async def aggregate_sites():
+    floors = get_floors()
+    async def fetch(idx, floor):
+        try:
+            resp = await floor_request(floor, "GET", "/api/sites")
+            resp.raise_for_status()
+            return [{**s, "floor_idx": idx, "floor_name": floor["name"]} for s in resp.json()]
+        except Exception:
+            return []
+    results = await asyncio.gather(*[fetch(i, f) for i, f in enumerate(floors)])
+    return [s for floor_sites in results for s in floor_sites]
+
+@app.post("/api/floors/{idx}/sites")
+async def floor_create_site(idx: int, body: dict = Body(...)):
+    floor = get_floor(idx)
+    resp = await floor_request(floor, "POST", "/api/sites", json=body)
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.delete("/api/floors/{idx}/sites/{site_id}")
+async def floor_delete_site(idx: int, site_id: int):
+    floor = get_floor(idx)
+    resp = await floor_request(floor, "DELETE", f"/api/sites/{site_id}")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.get("/api/settings/notifications")
+async def get_notifications():
+    floors = get_floors()
+    if not floors:
+        raise HTTPException(status_code=500, detail="No floors configured")
+    resp = await floor_request(floors[0], "GET", "/api/settings/notifications")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.post("/api/settings/notifications")
+async def update_notifications(body: dict = Body(...)):
+    floors = get_floors()
+    if not floors:
+        raise HTTPException(status_code=500, detail="No floors configured")
+    async def push(idx, floor):
+        try:
+            resp = await floor_request(floor, "POST", "/api/settings/notifications", json=body)
+            resp.raise_for_status()
+            return {"floor_idx": idx, "floor_name": floor["name"], "ok": True}
+        except Exception as e:
+            return {"floor_idx": idx, "floor_name": floor["name"], "ok": False, "error": str(e)}
+    results = await asyncio.gather(*[push(i, f) for i, f in enumerate(floors)])
+    if not all(r["ok"] for r in results):
+        raise HTTPException(status_code=207, detail={"message": "Notifications update partially failed", "results": results})
+    return {"ok": True, "results": results}
+
+@app.post("/api/settings/notifications/test")
+async def test_notifications(body: dict = Body(...)):
+    floors = get_floors()
+    if not floors:
+        raise HTTPException(status_code=500, detail="No floors configured")
+    resp = await floor_request(floors[0], "POST", "/api/settings/notifications/test", json=body)
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     return resp.json()
@@ -1017,3 +1239,18 @@ async def floor_delete_report(idx: int, report_id: int):
     return resp.json()
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# SPA catch-all: React Router's client-side routes (e.g. /monitoring,
+# /signals, /floors) have no matching server route, so a direct load or
+# a page refresh on one of those paths needs Master to still return
+# index.html and let the client-side router take over. Placed AFTER the
+# /static mount above so it never shadows real static asset requests.
+# Explicitly excludes known non-SPA prefixes so a typoed API path still
+# 404s instead of silently returning HTML.
+_NON_SPA_PREFIXES = ("api/", "static/", "agent-upgrade-binary/", "login", "logout")
+
+@app.get("/{full_path:path}")
+def spa_catch_all(full_path: str):
+    if any(full_path.startswith(p) for p in _NON_SPA_PREFIXES):
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(STATIC_DIR / "index.html")
