@@ -277,54 +277,54 @@ def _migrate_schema():
         if "action_passphrase_hash" not in cols:
             conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN action_passphrase_hash VARCHAR")
             conn.commit()
-            print("✅ Migrated: added machines.action_passphrase_hash")
+            print("Migrated: added machines.action_passphrase_hash")
 
         for col in ("current_version", "available_version", "upgrade_status"):
             if col not in cols:
                 conn.exec_driver_sql(f"ALTER TABLE machines ADD COLUMN {col} VARCHAR")
                 conn.commit()
-                print(f"✅ Migrated: added machines.{col}")
+                print(f"Migrated: added machines.{col}")
         for col in ("checkpoint_status", "checkpoint_snapshot_id"):
             if col not in cols:
                 conn.exec_driver_sql(f"ALTER TABLE machines ADD COLUMN {col} VARCHAR")
                 conn.commit()
-                print(f"✅ Migrated: added machines.{col}")
+                print(f"Migrated: added machines.{col}")
         if "checkpoint_armed_at" not in cols:
             conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN checkpoint_armed_at DATETIME")
             conn.commit()
-            print("✅ Migrated: added machines.checkpoint_armed_at")
+            print("Migrated: added machines.checkpoint_armed_at")
         if "redirect_target_url" not in cols:
             conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN redirect_target_url VARCHAR")
             conn.commit()
-            print("✅ Migrated: added machines.redirect_target_url")
+            print("Migrated: added machines.redirect_target_url")
         if "last_risk_score" not in cols:
             conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN last_risk_score INTEGER")
             conn.commit()
-            print("✅ Migrated: added machines.last_risk_score")
+            print("Migrated: added machines.last_risk_score")
         if "last_risk_at" not in cols:
             conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN last_risk_at DATETIME")
             conn.commit()
-            print("✅ Migrated: added machines.last_risk_at")
+            print("Migrated: added machines.last_risk_at")
         if "site_id" not in cols:
             conn.exec_driver_sql("ALTER TABLE machines ADD COLUMN site_id INTEGER")
             conn.commit()
-            print("✅ Migrated: added machines.site_id")
+            print("Migrated: added machines.site_id")
 
         audit_cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(audit_logs)").fetchall()]
         if "content_hash" not in audit_cols:
             conn.exec_driver_sql("ALTER TABLE audit_logs ADD COLUMN content_hash VARCHAR")
             conn.commit()
-            print("✅ Migrated: added audit_logs.content_hash")
+            print("Migrated: added audit_logs.content_hash")
 
         report_cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(reports)").fetchall()]
         if "machine_ids" not in report_cols:
             conn.exec_driver_sql("ALTER TABLE reports ADD COLUMN machine_ids VARCHAR")
             conn.commit()
-            print("✅ Migrated: added reports.machine_ids")
+            print("Migrated: added reports.machine_ids")
         if "report_type" not in report_cols:
             conn.exec_driver_sql("ALTER TABLE reports ADD COLUMN report_type VARCHAR DEFAULT 'single'")
             conn.commit()
-            print("✅ Migrated: added reports.report_type")
+            print("Migrated: added reports.report_type")
 
         alert_cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(alerts)").fetchall()]
         if "status" not in alert_cols:
@@ -353,7 +353,7 @@ def backfill_audit_hashes():
             conn.exec_driver_sql("UPDATE audit_logs SET content_hash = ? WHERE id = ?", (h, log_id))
         conn.commit()
     if rows:
-        print(f"✅ Backfilled content_hash for {len(rows)} audit_logs rows")
+        print(f"Backfilled content_hash for {len(rows)} audit_logs rows")
 
 
 def init_db():
@@ -380,7 +380,7 @@ def _seed_admin():
             )
             db.add(admin)
             db.commit()
-            print("✅ Default admin created:", admin.email)
+            print("Default admin created:", admin.email)
     finally:
         db.close()
 

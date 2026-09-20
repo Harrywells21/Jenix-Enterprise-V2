@@ -33,16 +33,16 @@ from routes.sites           import router as sites_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    print("✅ Database ready")
+    print("Database ready")
     asyncio.create_task(offline_watchdog())
-    print("✅ Offline watchdog started")
+    print("Offline watchdog started")
     init_scheduler()
-    print("✅ Scheduler started")
+    print("Scheduler started")
     asyncio.create_task(run_cleanup())
-    print("✅ Cleanup job scheduled (every 6h)")
+    print("Cleanup job scheduled (every 6h)")
     asyncio.create_task(run_backup_scheduler())
-    print("✅ Backup scheduler started (every 24h)")
-    print("✅ JENIX Enterprise v2.0 running")
+    print("Backup scheduler started (every 24h)")
+    print("JENIX Enterprise v2.0 running")
     yield
     print("[server] Shutting down...")
 
@@ -180,7 +180,7 @@ def health():
         "time":    __import__("datetime").datetime.utcnow().isoformat()
     }
 
-# ✅ Landing page as server root
+# Landing page as server root
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def root():
     return """<!DOCTYPE html>

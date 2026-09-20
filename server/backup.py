@@ -30,7 +30,7 @@ def backup_now() -> str:
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     dest      = BACKUP_DIR / f"jenix_{timestamp}.db"
     shutil.copy2(DB_PATH, dest)
-    print(f"[backup] ✅ Backup created: {dest}")
+    print(f"[backup] Backup created: {dest}")
 
     # Remove old backups beyond MAX_BACKUPS
     backups = sorted(BACKUP_DIR.glob("jenix_*.db"))
@@ -78,5 +78,5 @@ def restore_backup(filename: str) -> bool:
     # Backup current DB first
     backup_now()
     shutil.copy2(src, DB_PATH)
-    print(f"[backup] ✅ Restored from: {filename}")
+    print(f"[backup] Restored from: {filename}")
     return True

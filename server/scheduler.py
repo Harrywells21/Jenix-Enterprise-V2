@@ -10,7 +10,7 @@ scheduler = AsyncIOScheduler()
 
 def init_scheduler():
     scheduler.start()
-    print("✅ Scheduler started")
+    print("Scheduler started")
     _reload_schedules()
 
 def _reload_schedules():
@@ -52,7 +52,7 @@ async def _run_scheduled_scan(schedule_id: int):
         if not s or not s.is_active:
             return
 
-        # ✅ Duplicate guard — skip if ran in last 23 hours
+        # Duplicate guard — skip if ran in last 23 hours
         if s.last_run:
             hours_since = (datetime.utcnow() - s.last_run)\
                           .total_seconds() / 3600
