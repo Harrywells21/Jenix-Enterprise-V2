@@ -54,7 +54,10 @@ if ($env:JENIX_SITE_ID) {
 }
 
 Write-Host "[4/5] Registering Windows Service via NSSM..."
+$_prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'SilentlyContinue'
 & $NssmExe status JenixAgent 2>$null | Out-Null
+$ErrorActionPreference = $_prevEAP
 if ($LASTEXITCODE -eq 0) {
     Write-Host "      Existing JenixAgent service found -- stopping and removing for a clean reinstall..."
     & $NssmExe stop JenixAgent 2>$null | Out-Null
