@@ -16,6 +16,30 @@ def _config_dir() -> Path:
     return Path.home() / ".jenix"
 
 _CONFIG_DIR  = _config_dir()
+
+def _redirect_windows_stdio():
+    """PyInstaller's onefile bootloader on Windows does not reliably propagate
+    redirected (non-console) stdout/stderr handles through its internal child
+    re-exec -- confirmed Sept 22: running the exe attached to a real console
+    produces correct output immediately, but launching the identical exe via
+    NSSM (file redirect) or via Start-Process -RedirectStandardOutput (pipe
+    redirect) produced zero output across every test, with no exception
+    raised. Forcibly reopening stdout/stderr as a self-owned, line-buffered
+    file this process holds directly -- rather than relying on inherited OS
+    handles -- sidesteps that inheritance boundary entirely. Windows-only;
+    Linux/macOS already log correctly via inherited stdio under
+    systemd/journald and are intentionally left untouched.
+    """
+    if platform.system() != "Windows":
+        return
+    log_dir = _CONFIG_DIR / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "agent.log"
+    f = open(log_path, "a", buffering=1, encoding="utf-8")
+    sys.stdout = f
+    sys.stderr = f
+
+_redirect_windows_stdio()
 TOKEN_FILE   = _CONFIG_DIR / "agent.token"
 MACHINE_FILE = _CONFIG_DIR / "agent.machine_id"
 SERVER_FILE  = _CONFIG_DIR / "server_url"
@@ -120,7 +144,6 @@ async def run_agent(token: str):
 
     async with websockets.connect(uri, ping_interval=20,
                                        ping_timeout=10) as ws:
-        import time as _t; print(f"[AGENTDEBUG] connected t={_t.time():.3f}")
 
         # Send register message so server creates the node in DB
         from collector import get_system_info
@@ -135,7 +158,6 @@ async def run_agent(token: str):
             }
         }))
         print("[agent] Register message sent")
-        print(f"[AGENTDEBUG] register sent t={_t.time():.3f}")
 
         # Capture the running event loop here — in the async context
         loop = asyncio.get_running_loop()
@@ -201,9 +223,13 @@ async def run_agent(token: str):
                 if task_exc is not None:
                     raise task_exc
         except Exception as _e:
-            import traceback as _tb
-            print(f"[AGENTDEBUG] gather raised t={_t.time():.3f}: {_e}")
-            _tb.print_exc()
+            _expected_close = (
+                isinstance(_e, websockets.exceptions.ConnectionClosed)
+                and getattr(_e, "code", None) in (4003, 4001)
+            )
+            if not _expected_close:
+                import traceback as _tb
+                _tb.print_exc()
             raise
         finally:
             for spawned in (metrics_task, recv_task):
