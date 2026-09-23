@@ -1201,18 +1201,18 @@ async def floor_generate_fleet_report(idx: int, body: dict = Body(default={})):
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     return resp.json()
 
-@app.post("/api/floors/{idx}/reports/{machine_id}")
-async def floor_generate_report(idx: int, machine_id: int):
-    floor = get_floor(idx)
-    resp = await floor_request(floor, "POST", f"/api/reports/{machine_id}")
-    if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
-    return resp.json()
-
 @app.post("/api/floors/{idx}/reports/audit")
 async def floor_generate_audit_report(idx: int):
     floor = get_floor(idx)
     resp = await floor_request(floor, "POST", "/api/reports/audit")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.post("/api/floors/{idx}/reports/{machine_id}")
+async def floor_generate_report(idx: int, machine_id: int):
+    floor = get_floor(idx)
+    resp = await floor_request(floor, "POST", f"/api/reports/{machine_id}")
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     return resp.json()
