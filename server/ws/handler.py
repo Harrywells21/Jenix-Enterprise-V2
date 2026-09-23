@@ -19,10 +19,6 @@ async def agent_endpoint(websocket: WebSocket, token: str):
     db = SessionLocal()
     try:
         m = db.query(Machine).filter(Machine.token == token).first()
-        print(f"[DEBUG] received token repr: {token!r} len={len(token)}")
-        print(f"[DEBUG] query result: {m.id if m else None} status={m.status if m else None}")
-        all_tokens = [row.token for row in db.query(Machine).all()]
-        print(f"[DEBUG] all tokens in db right now: {all_tokens}")
         if not m:
             _agents.pop(token, None)
             await websocket.close(code=4001)
@@ -233,10 +229,7 @@ async def agent_endpoint(websocket: WebSocket, token: str):
     except WebSocketDisconnect as e:
         pass
     except Exception as e:
-        import traceback as _tb
-        import time as _t
-        print(f"[WS] Agent error t={_t.time():.3f}: {e}")
-        _tb.print_exc()
+        print(f"[WS] Agent error: {e}")
     finally:
         _agents.pop(token, None)
         db = SessionLocal()
