@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import asyncio, json, os, sys, signal, platform
 import websockets
+import websockets.exceptions
 from pathlib import Path
 
 def _config_dir() -> Path:
