@@ -9,6 +9,16 @@
       "script": null,
       "signature": null,
       "created_at": 1787991445.9530754
+    },
+    {
+      "id": "3ddb41de22b847ca",
+      "name": "Scan",
+      "description": "",
+      "command_type": "scan",
+      "params": {},
+      "script": null,
+      "signature": null,
+      "created_at": 1789360875.4647443
     }
   ]
 }
