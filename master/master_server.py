@@ -1193,18 +1193,18 @@ async def aggregate_reports():
     combined.sort(key=lambda x: x["created_at"], reverse=True)
     return combined
 
-@app.post("/api/floors/{idx}/reports/{machine_id}")
-async def floor_generate_report(idx: int, machine_id: int):
-    floor = get_floor(idx)
-    resp = await floor_request(floor, "POST", f"/api/reports/{machine_id}")
-    if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
-    return resp.json()
-
 @app.post("/api/floors/{idx}/reports/fleet")
 async def floor_generate_fleet_report(idx: int, body: dict = Body(default={})):
     floor = get_floor(idx)
     resp = await floor_request(floor, "POST", "/api/reports/fleet", json=body)
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+@app.post("/api/floors/{idx}/reports/{machine_id}")
+async def floor_generate_report(idx: int, machine_id: int):
+    floor = get_floor(idx)
+    resp = await floor_request(floor, "POST", f"/api/reports/{machine_id}")
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     return resp.json()
