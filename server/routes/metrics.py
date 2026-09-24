@@ -48,7 +48,10 @@ def get_alerts(machine_id: int, db: Session = Depends(get_db),
 def mark_read(machine_id: int, alert_id: int,
               db: Session = Depends(get_db),
               _:  User    = Depends(get_current_user)):
-    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    alert = db.query(Alert).filter(
+        Alert.id == alert_id,
+        Alert.machine_id == machine_id,
+    ).first()
     if alert:
         alert.is_read = True
         db.commit()

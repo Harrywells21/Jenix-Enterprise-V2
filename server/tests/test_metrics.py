@@ -116,15 +116,13 @@ def test_mark_alert_read_unknown_id_still_returns_ok(client, db_session, viewer_
     assert r.json() == {"ok": True}
 
 
-def test_mark_alert_read_ignores_machine_id_mismatch(client, db_session, viewer_user):
-    # FLAGGED FINDING, not a bug fix: mark_read's query filters ONLY on
-    # Alert.id ("db.query(Alert).filter(Alert.id == alert_id).first()") and
-    # never checks that the alert's own machine_id matches the {machine_id}
-    # in the URL path. This test documents that real, current behavior --
-    # an alert belonging to a DIFFERENT machine than the one named in the
-    # URL is still marked read successfully. Not silently patched here;
-    # surfaced for the user's explicit sign-off per the standing rule that
-    # unexpected route behavior isn't changed without confirmation.
+def test_mark_alert_read_rejects_machine_id_mismatch(client, db_session, viewer_user):
+    # FIXED (was a flagged finding): mark_read's query now filters on both
+    # Alert.id AND Alert.machine_id, so a mismatched machine_id in the URL
+    # no longer marks an alert belonging to a different machine as read.
+    # The endpoint still returns {"ok": True} either way (same silent-noop
+    # style as the unknown-id case above) -- only the underlying row is
+    # left untouched.
     m1 = make_machine(db_session, token="tok-met-c")
     m2 = Machine(hostname="host-met-3", ip="10.0.0.32", token="tok-met-d", status="online")
     db_session.add(m2); db_session.commit(); db_session.refresh(m2)
@@ -133,5 +131,13 @@ def test_mark_alert_read_ignores_machine_id_mismatch(client, db_session, viewer_
     r = client.patch(f"/api/machines/{m2.id}/alerts/{a.id}/read",
                       headers=auth_headers(viewer_user))
     assert r.status_code == 200
+    assert r.json() == {"ok": True}
     db_session.refresh(a)
-    assert a.is_read is True  # documents the gap -- would fail if this were ever fixed
+    assert a.is_read is False  # the mismatch means the real row was never touched
+
+    # Sanity check: the same alert CAN be marked read via its correct machine.
+    r2 = client.patch(f"/api/machines/{m1.id}/alerts/{a.id}/read",
+                       headers=auth_headers(viewer_user))
+    assert r2.status_code == 200
+    db_session.refresh(a)
+    assert a.is_read is True
