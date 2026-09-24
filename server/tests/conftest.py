@@ -1,8 +1,6 @@
 import sys
 from pathlib import Path
 
-# main.py / db.py / auth.py use non-package-relative imports (from db import ...),
-# so pytest needs server/ on sys.path -- same as how uvicorn is run from server/.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
@@ -17,9 +15,6 @@ from main import app
 
 TEST_DB_URL = "sqlite:///:memory:"
 
-# StaticPool is required for in-memory sqlite under a real multi-route app --
-# without it each new connection gets a separate empty DB (verified in sandbox
-# testing: this caused "no such table: users" on the very first run).
 engine = create_engine(
     TEST_DB_URL,
     connect_args={"check_same_thread": False},
@@ -39,10 +34,6 @@ def db_session():
         Base.metadata.drop_all(bind=engine)
 
 
-# Session-scoped: main.py's lifespan starts a real APScheduler singleton
-# that is never torn down between re-entries, so re-triggering lifespan
-# per-test raises SchedulerAlreadyRunningError on the 2nd+ test. Enter the
-# real app's lifespan exactly once for the whole test run instead.
 @pytest.fixture(scope="session")
 def _live_app():
     with TestClient(app) as c:
@@ -86,3 +77,27 @@ def viewer_user(db_session):
 
 def login(client, email, password):
     return client.post("/api/auth/login", data={"username": email, "password": password})
+
+
+# ── Additions for agents/commands/metrics test suites ──────────────────────
+# Not part of the original auth-flow conftest.py (85b80e1). Adds an
+# operator-role fixture (require_operator gates commands.py's run_command)
+# and a direct-token header helper so these suites don't need to depend on
+# routes/auth.py's login endpoint at all -- they authenticate the same way
+# any API client would, via a real auth.create_token() bearer token.
+from auth import create_token
+
+@pytest.fixture()
+def operator_user(db_session):
+    user = User(name="Operator", email="operator@jenix.test",
+                password_hash=hash_password("operatorpass123"),
+                role="operator", is_active=True)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+def auth_headers(user):
+    token = create_token({"sub": str(user.id)})
+    return {"Authorization": f"Bearer {token}"}
