@@ -1,0 +1,5 @@
+# Only needed to build the agent binary via PyInstaller.
+# NOT required to run the Floor/Master servers.
+altgraph==0.17.5
+pyinstaller==6.22.0
+pyinstaller-hooks-contrib==2026.6
