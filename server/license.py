@@ -20,7 +20,8 @@ def generate_license(company_name: str, max_nodes: int = -1,
     data     = json.dumps(payload, sort_keys=True)
     sig      = hashlib.sha256(f"{data}{SECRET}".encode()).hexdigest()[:16]
     encoded  = base64.b64encode(data.encode()).decode()
-    return f"JENIX-{encoded}-{sig}".upper()
+    # NOTE: the base64 payload is case-sensitive -- only the signature is upper-cased.
+    return f"JENIX-{encoded}-{sig.upper()}"
 
 def validate_license(key: str) -> dict:
     try:
