@@ -32,6 +32,9 @@ from reportlab.platypus import (
 )
 from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.graphics.shapes import Drawing, Rect
+from typing import List, Optional
+from xml.sax.saxutils import escape as _xml_escape
+from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
 # 5-tier risk band (spec section 3.2 "Risk score / label bands (keep consistent
@@ -78,10 +81,10 @@ def scope_of(action):
 # ---------------------------------------------------------------------------
 # 2.1 Machines/Period summary line
 # ---------------------------------------------------------------------------
-def machines_period_summary(events):
-    machines = sorted({e["machine"] for e in events})
-    start = min(e["timestamp"] for e in events)[:10]
-    end = max(e["timestamp"] for e in events)[:10]
+def machines_period_summary(events, scope_names=None):
+    machines = sorted({e["machine"] for e in events} | set(scope_names or []))
+    start = min((e["timestamp"] for e in events), default="")[:10] or "-"
+    end = max((e["timestamp"] for e in events), default="")[:10] or "-"
     return {
         "machines_covered": ", ".join(machines),
         "event_count": len(events),
@@ -107,36 +110,74 @@ def _window_and_date(rows):
     return window, earliest[:10]
 
 
+def _plural(n, word):
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _cell_text(v):
+    """Make a value safe for ReportLab Paragraph markup and for the base-14 (WinAnsi) fonts."""
+    s = "" if v is None else str(v)
+    s = "".join(" " if ch in "\r\n\t" else ch for ch in s if ch >= " " or ch in "\r\n\t")
+    return _xml_escape(s.encode("cp1252", "replace").decode("cp1252"))
+
+
+def _escape_events(events):
+    out = []
+    for e in events:
+        d = dict(e)
+        for k in ("machine", "action", "detail", "fingerprint"):
+            d[k] = _cell_text(e.get(k))
+        d["status"] = _cell_text(e.get("status") or "ok").strip().lower()
+        out.append(d)
+    return out
+
+
 def build_executive_summary(events, notable_groups):
+    """Every statement below is derived from the events passed in. Nothing is asserted about
+    causes the audit log does not record (e.g. why a denial happened)."""
     critical = sum(1 for e in events if e["status"] == "critical")
     warning = sum(1 for e in events if e["status"] == "warning")
     ok = sum(1 for e in events if e["status"] == "ok")
+    n = len(events)
+    crit_events = [e for e in events if e["status"] == "critical"]
 
-    if notable_groups:
-        # Fixed Sept 4 2026: window/date/machines/pattern now computed across ALL
-        # critical events, not just the lead group - the old version could understate
-        # the true time span and falsely imply every critical event shared one pattern.
-        lead = notable_groups[0]
-        crit_events = [e for e in events if e["status"] == "critical"]
-        crit_window, crit_date = _window_and_date(crit_events) if crit_events else (lead["window"], lead["date"])
-        machines_in_group = ", ".join(sorted({e["machine"] for e in crit_events})) or lead["machine"]
-        actions_in_group = sorted({e["action"] for e in crit_events})
-        if len(actions_in_group) == 1:
-            pattern_desc = _describe_pattern(actions_in_group[0])
-        else:
-            pattern_desc = "multiple denied-action patterns (" + ", ".join(
-                a.replace("_denied", "").replace("_", "-") for a in actions_in_group) + ")"
-        narrative = (
-            f"{critical} critical events were recorded, all reflecting {pattern_desc} "
-            f"against {machines_in_group}, clustered within a window of {crit_window} on "
-            f"{crit_date}. This pattern is consistent with {_interpretation(lead['action'])} "
-            f"and warrants {_recommended_followup(lead['action'])}."
-        )
+    if n == 0:
+        narrative = "No audit events were recorded for this scope and period."
+    elif not crit_events:
+        narrative = (f"No critical events were recorded across {_plural(n, 'event')} on "
+                     f"{_plural(len({e['machine'] for e in events}), 'machine')}.")
+        if warning:
+            narrative += (f" {_plural(warning, 'warning event')} "
+                          f"{'was' if warning == 1 else 'were'} recorded and may merit routine review.")
     else:
-        narrative = (
-            "No critical audit events were recorded in this period. Activity across the "
-            "covered machines remained within normal operational patterns."
-        )
+        cm = sorted({e["machine"] for e in crit_events})
+        stamps = sorted(e["timestamp"] for e in crit_events)
+        dates = sorted({t[:10] for t in stamps})
+        if len(dates) == 1:
+            lo, hi = stamps[0][11:], stamps[-1][11:]
+            when = (f"at {lo} on {dates[0]}" if lo == hi
+                    else f"clustered within a window of {lo}-{hi} on {dates[0]}")
+        else:
+            when = f"spanning {dates[0]} to {dates[-1]}"
+        verb = "was" if critical == 1 else "were"
+        if all(e["action"].endswith("_denied") for e in crit_events):
+            kinds = sorted({e["action"][:-len("_denied")].replace("_", "-") for e in crit_events})
+            pattern = "multiple denied-action patterns" if len(kinds) > 1 else "a denied-action pattern"
+            narrative = (f"{_plural(critical, 'critical event')} {verb} recorded, all reflecting "
+                         f"{pattern} ({', '.join(kinds)}) against {', '.join(cm)}, {when}.")
+            first = stamps[0]
+            followed = any(e["machine"] in cm and e["timestamp"] >= first
+                           and e["action"] in ("passphrase_set", "passphrase_cleared") for e in events)
+            follow = ("confirming the passphrase reset that followed was performed by an authorized admin"
+                      if followed else
+                      "reviewing the responsible user's permissions and confirming the denial was not "
+                      "an active intrusion attempt")
+            narrative += (" This pattern is consistent with an authorization or permissions gap "
+                          f"rather than a confirmed intrusion and warrants {follow}.")
+        else:
+            kinds = sorted({e["action"] for e in crit_events})
+            narrative = (f"{_plural(critical, 'critical event')} {verb} recorded ({', '.join(kinds)}) "
+                         f"on {', '.join(cm)}, {when}. Review of these entries is recommended.")
 
     return {
         "critical_count": critical,
@@ -146,30 +187,6 @@ def build_executive_summary(events, notable_groups):
     }
 
 
-def _describe_pattern(action):
-    mapping = {
-        "fleet_boost_denied": "repeated denied fleet-boost authorization attempts",
-        "rollback_denied": "denied rollback attempts due to insufficient permissions",
-        "fix_denied": "denied fix commands against an unreachable target service",
-        "clean_denied": "denied clean commands while the target disk was busy",
-    }
-    return mapping.get(action, f"repeated '{action}' denial events")
-
-
-def _interpretation(action):
-    if action.endswith("_denied"):
-        return "an authorization or permissions gap rather than a confirmed intrusion"
-    return "an anomaly worth reviewing"
-
-
-def _recommended_followup(action):
-    if action == "fleet_boost_denied":
-        return "confirming the passphrase reset that followed was performed by an authorized admin"
-    if action.endswith("_denied"):
-        return "reviewing the responsible user's permissions and confirming the denial was not an active intrusion attempt"
-    return "a manual review"
-
-
 # ---------------------------------------------------------------------------
 # 2.3 EVENT BREAKDOWN BY STATUS
 # ---------------------------------------------------------------------------
@@ -177,9 +194,9 @@ def event_breakdown_by_status(events):
     total = len(events)
     counts = OrderedDict([("critical", 0), ("warning", 0), ("ok", 0)])
     for e in events:
-        counts[e["status"]] += 1
+        counts[e["status"]] = counts.get(e["status"], 0) + 1
     rows = []
-    for status in ("critical", "warning", "ok"):
+    for status in counts:
         c = counts[status]
         share = (c / total * 100) if total else 0.0
         rows.append({"status": status, "count": c, "share": share})
@@ -425,7 +442,10 @@ class NumberedCanvas(pdfcanvas.Canvas):
         self.restoreState()
 
 
-def build_audit_trail_pdf(events, report_id, generated_utc, out_path):
+def build_audit_trail_pdf(events, report_id, generated_utc, out_path,
+                          scope_names=None, total_available=None):
+    events = _escape_events(events)
+    scope_names = [_cell_text(x) for x in (scope_names or [])]
     ss = _styles()
     story = []
 
@@ -439,20 +459,24 @@ def build_audit_trail_pdf(events, report_id, generated_utc, out_path):
     story.append(Spacer(1, 10))
 
     # ---- 2.1 Machines/Period summary line ----
-    summary = machines_period_summary(events)
+    summary = machines_period_summary(events, scope_names)
     meta_tbl = _table(
         [
             [Paragraph("MACHINES COVERED", ss["CellHeader"]),
              Paragraph("EVENT COUNT", ss["CellHeader"]),
              Paragraph("PERIOD", ss["CellHeader"])],
-            [Paragraph(summary["machines_covered"], ss["CellSmall"]),
-             Paragraph(f"{summary['event_count']} events", ss["CellSmall"]),
-             Paragraph(f"{summary['period_start']} to {summary['period_end']}", ss["CellSmall"])],
+            [Paragraph(summary["machines_covered"] or "-", ss["CellSmall"]),
+             Paragraph(_plural(summary['event_count'], 'event'), ss["CellSmall"]),
+             Paragraph(f"{summary['period_start']} to {summary['period_end']}" if summary['period_start'] != "-" else "-", ss["CellSmall"])],
         ],
         col_widths=[USABLE_W * 0.42, USABLE_W * 0.18, USABLE_W * 0.40],
         header_bg=colors.HexColor("#3a4a68"),
     )
     story.append(meta_tbl)
+    if total_available and total_available > len(events):
+        story.append(Paragraph(
+            f"Showing the most recent {len(events)} of {total_available} events for this scope; "
+            f"older events are not included.", ss["Note"]))
     story.append(Spacer(1, 14))
 
     # ---- 2.2 EXECUTIVE SUMMARY ----
@@ -495,7 +519,7 @@ def build_audit_trail_pdf(events, report_id, generated_utc, out_path):
     rows = [[Paragraph("Status", ss["CellHeader"]), Paragraph("Count", ss["CellHeader"]),
               Paragraph("Share", ss["CellHeader"]), Paragraph("Distribution", ss["CellHeader"])]]
     for r in event_breakdown_by_status(events):
-        bar_color = STATUS_COLOR[r["status"]]
+        bar_color = STATUS_COLOR.get(r["status"], GREY)
         rows.append([
             Paragraph(r["status"], ss["CellSmall"]),
             Paragraph(str(r["count"]), ss["CellSmall"]),
@@ -542,6 +566,8 @@ def build_audit_trail_pdf(events, report_id, generated_utc, out_path):
             Paragraph(f"{r['occurrences']}x", ss["CellSmall"]),
             Paragraph(f"{r['share']:.1f}%", ss["CellSmall"]),
         ])
+    if len(trows) == 1:
+        trows.append([Paragraph("-", ss["CellSmall"])] * 3)
     top_block.append(_table(trows, col_widths=[260, 130, 142], align_right_cols=[1, 2]))
     story.append(KeepTogether(top_block))
     story.append(Spacer(1, 14))
@@ -557,6 +583,8 @@ def build_audit_trail_pdf(events, report_id, generated_utc, out_path):
             Paragraph(f"{r['events']}x", ss["CellSmall"]),
             Paragraph(f"{r['share']:.1f}%", ss["CellSmall"]),
         ])
+    if len(mrows) == 1:
+        mrows.append([Paragraph("-", ss["CellSmall"])] * 3)
     mach_block.append(_table(mrows, col_widths=[220, 150, 162], align_right_cols=[1, 2]))
     story.append(KeepTogether(mach_block))
     story.append(Spacer(1, 14))
@@ -565,7 +593,7 @@ def build_audit_trail_pdf(events, report_id, generated_utc, out_path):
     story.append(CondPageBreak(140))
     trail = full_audit_trail(events)
     story.append(Paragraph(
-        f"FULL AUDIT TRAIL ({len(trail)} events, integrity-fingerprinted, newest first)",
+        f"FULL AUDIT TRAIL ({_plural(len(trail), 'event')}, integrity-fingerprinted, newest first)",
         ss["SectionHeading"]))
     frows = [[Paragraph("Timestamp", ss["CellHeader"]), Paragraph("Machine", ss["CellHeader"]),
                Paragraph("Action", ss["CellHeader"]), Paragraph("Detail", ss["CellHeader"]),
@@ -579,7 +607,10 @@ def build_audit_trail_pdf(events, report_id, generated_utc, out_path):
             Paragraph(r["status"], ss["CellSmall"]),
             Paragraph(r["fingerprint"], ss["CellMono"]),
         ])
-    story.append(_table(frows, col_widths=[76, 74, 92, 178, 44, 68]))
+    if trail:
+        story.append(_table(frows, col_widths=[76, 74, 92, 178, 44, 68]))
+    else:
+        story.append(Paragraph("No audit events were recorded for this scope.", ss["Narrative"]))
 
     doc = SimpleDocTemplate(
         out_path, pagesize=letter,
@@ -651,6 +682,25 @@ def get_events_from_db(db_session, machine_ids=None, start=None, end=None):
             "fingerprint": l.content_hash or "",
         })
     return events
+
+
+def count_events(db_session, machine_ids=None, start=None, end=None):
+    """Total rows matching the same filters as get_events_from_db (which caps at 1000)."""
+    from db import AuditLog
+    query = db_session.query(AuditLog)
+    if machine_ids:
+        query = query.filter(AuditLog.machine_id.in_(machine_ids))
+    if start:
+        query = query.filter(AuditLog.timestamp >= start)
+    if end:
+        query = query.filter(AuditLog.timestamp <= end)
+    return query.count()
+
+
+class AuditReportRequest(BaseModel):
+    machine_ids: Optional[List[int]] = None
+    start: Optional[str] = None
+    end: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

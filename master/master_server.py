@@ -1202,12 +1202,15 @@ async def floor_generate_fleet_report(idx: int, body: dict = Body(default={})):
     return resp.json()
 
 @app.post("/api/floors/{idx}/reports/audit")
-async def floor_generate_audit_report(idx: int):
+async def floor_generate_audit_report(idx: int, body: dict = Body(default={})):
     floor = get_floor(idx)
-    resp = await floor_request(floor, "POST", "/api/reports/audit")
+    resp = await floor_request(floor, "POST", "/api/reports/audit", json=body)
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
-    return resp.json()
+    data = resp.json()
+    if body.get("machine_ids") and data.get("scope") != "machine":
+        raise HTTPException(status_code=501, detail="This floor's server did not confirm a machine-scoped audit report (it may need updating). The report it generated covers the whole floor.")
+    return data
 
 @app.post("/api/floors/{idx}/reports/{machine_id}")
 async def floor_generate_report(idx: int, machine_id: int):

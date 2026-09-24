@@ -6,7 +6,8 @@ from db import get_db, Machine, Report, Metric, AuditLog, Alert
 from auth import get_current_user, require_operator, User
 from datetime import datetime
 import os, textwrap, jwt, csv, re
-from routes.audit_trail_report import get_events_from_db, build_audit_trail_pdf, write_audit_csv, risk_band as _shared_risk_band
+from typing import Optional as _Optional
+from routes.audit_trail_report import get_events_from_db, build_audit_trail_pdf, write_audit_csv, risk_band as _shared_risk_band, AuditReportRequest, count_events
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 REPORTS_DIR = os.path.join(os.path.dirname(__file__), "..", "reports")
@@ -740,20 +741,56 @@ def _generate_audit_pdf(logs: list, machines: dict, users: dict) -> tuple:
 
 
 @router.post("/audit")
-def generate_audit_report(db: Session = Depends(get_db),
+def generate_audit_report(payload: _Optional[AuditReportRequest] = None,
+                          db: Session = Depends(get_db),
                           current_user: User = Depends(require_operator)):
-    events = get_events_from_db(db)
+    """Audit trail PDF. No body = whole floor (unchanged behaviour). Body {"machine_ids": [..],
+    "start": ISO, "end": ISO} scopes the report; unknown machine ids return 404."""
+    from fastapi import HTTPException as _HTTPException
+    from db import Machine as _Machine
+    machine_ids = (payload.machine_ids if payload else None) or None
+
+    def _dt(v):
+        if not v:
+            return None
+        try:
+            return datetime.fromisoformat(v)
+        except ValueError:
+            raise _HTTPException(status_code=400, detail=f"Invalid ISO date/time: {v!r}")
+    start = _dt(payload.start if payload else None)
+    end = _dt(payload.end if payload else None)
+
+    scope_names = None
+    if machine_ids:
+        found = {m.id: m.hostname for m in db.query(_Machine).filter(_Machine.id.in_(machine_ids)).all()}
+        missing = [i for i in machine_ids if i not in found]
+        if missing:
+            raise _HTTPException(status_code=404, detail=f"Machine id(s) not found: {missing}")
+        scope_names = [found[i] for i in machine_ids]
+
+    events = get_events_from_db(db, machine_ids, start, end)
+    total_available = count_events(db, machine_ids, start, end)
     report_id = f"JX-{datetime.utcnow():%Y%m%d-%H%M%S}"
     generated_utc = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
-    fname = f"jenix_audit_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+    stamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    if scope_names and len(scope_names) == 1:
+        host = "".join(c if (c.isalnum() or c in "-_") else "_" for c in scope_names[0])
+        fname = f"jenix_audit_report_{host}_{stamp}.pdf"
+    else:
+        fname = f"jenix_audit_report_{stamp}.pdf"
     fpath = os.path.join(REPORTS_DIR, fname)
-    build_audit_trail_pdf(events, report_id, generated_utc, fpath)
+    build_audit_trail_pdf(events, report_id, generated_utc, fpath,
+                          scope_names=scope_names, total_available=total_available)
     size_kb = os.path.getsize(fpath) / 1024
-    report  = Report(machine_id=0, report_type="audit",
+    report  = Report(machine_id=(machine_ids[0] if machine_ids and len(machine_ids) == 1 else 0),
+                     report_type="audit",
                      filename=fname, filepath=fpath, size_kb=round(size_kb, 1))
     db.add(report); db.commit(); db.refresh(report)
     return {"report_id": report.id, "filename": fname,
-            "size_kb": report.size_kb, "total_entries": len(events)}
+            "size_kb": report.size_kb, "total_entries": len(events),
+            "total_available": total_available,
+            "scope": "machine" if machine_ids else "floor",
+            "machines": scope_names}
 
 
 @router.get("/audit/csv")
