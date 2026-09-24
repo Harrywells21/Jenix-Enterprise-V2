@@ -1,0 +1,3 @@
+# Test-only dependencies. NOT required to run the Floor/Master servers --
+# kept separate from requirements.txt on purpose.
+pytest==8.3.3
