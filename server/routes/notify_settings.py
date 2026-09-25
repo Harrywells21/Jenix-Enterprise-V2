@@ -5,6 +5,8 @@ import os
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
+ENV_PATH = os.path.join(os.path.dirname(__file__), "..", ".env")
+
 class NotifyConfig(BaseModel):
     slack_webhook:  str = ""
     teams_webhook:  str = ""
@@ -17,8 +19,7 @@ class NotifyConfig(BaseModel):
 @router.post("/notifications")
 def update_notify(body: NotifyConfig,
                   _: User = Depends(require_admin)):
-    env_path = os.path.join(
-        os.path.dirname(__file__), "..", ".env")
+    env_path = ENV_PATH
     lines = []
     if os.path.exists(env_path):
         with open(env_path) as f:
@@ -54,14 +55,31 @@ def update_notify(body: NotifyConfig,
     with open(env_path, "w") as f:
         f.writelines(new_lines)
 
-    return {"ok": True, "message": "Notification settings updated"}
+    # notifications.py / alerting.py cache SLACK_WEBHOOK / TEAMS_WEBHOOK /
+    # SMTP_* / ALERT_EMAIL at process import time, so a save here has no
+    # effect on the running process until it restarts. Flag that honestly
+    # instead of letting an admin assume "saved" means "live".
+    import notifications, alerting
+    live_mismatch = (
+        notifications.SLACK_WEBHOOK != body.slack_webhook or
+        notifications.TEAMS_WEBHOOK != body.teams_webhook or
+        alerting.ALERT_EMAIL        != body.alert_email or
+        alerting.SMTP_HOST          != body.smtp_host or
+        alerting.SMTP_PORT          != body.smtp_port or
+        alerting.SMTP_USER          != body.smtp_user or
+        (bool(body.smtp_pass) and alerting.SMTP_PASS != body.smtp_pass)
+    )
+
+    return {
+        "ok": True,
+        "message": "Notification settings updated",
+        "restart_required": bool(live_mismatch),
+    }
 
 @router.get("/notifications")
 def get_notify(_: User = Depends(require_admin)):
     from dotenv import dotenv_values
-    env_path = os.path.join(
-        os.path.dirname(__file__), "..", ".env")
-    vals = dotenv_values(env_path)
+    vals = dotenv_values(ENV_PATH)
     return {
         "slack_webhook": vals.get("SLACK_WEBHOOK", ""),
         "teams_webhook": vals.get("TEAMS_WEBHOOK", ""),
@@ -81,25 +99,39 @@ class TestNotification(BaseModel):
 @router.post("/notifications/test")
 def test_notification(body: TestNotification,
                       _: User = Depends(require_admin)):
-    from notifications import notify_slack, notify_teams, send_alert_email
+    import notifications, alerting
     try:
         if body.type == "slack":
-            notify_slack(
+            if not notifications.SLACK_WEBHOOK:
+                return {"ok": False, "message":
+                        "Slack webhook is not active on the running server. "
+                        "If you just saved one, restart the server for it to take effect."}
+            notifications.notify_slack(
                 "JENIX Test Notification",
                 "✅ Your Slack integration is working correctly!",
                 "info"
             )
         elif body.type == "teams":
-            notify_teams(
+            if not notifications.TEAMS_WEBHOOK:
+                return {"ok": False, "message":
+                        "Teams webhook is not active on the running server. "
+                        "If you just saved one, restart the server for it to take effect."}
+            notifications.notify_teams(
                 "JENIX Test Notification",
                 "✅ Your Teams integration is working correctly!",
                 "info"
             )
         elif body.type == "email":
-            send_alert_email(
+            if not (alerting.SMTP_USER and alerting.SMTP_PASS and alerting.ALERT_EMAIL):
+                return {"ok": False, "message":
+                        "Email is not fully configured on the running server. "
+                        "If you just saved SMTP settings, restart the server for them to take effect."}
+            alerting.send_alert_email(
                 "JENIX Test Notification",
                 "<b>✅ Your email integration is working correctly!</b>"
             )
+        else:
+            return {"ok": False, "message": f"Unknown notification type: {body.type}"}
         return {"ok": True, "message": f"Test {body.type} notification sent"}
     except Exception as e:
         return {"ok": False, "message": str(e)}

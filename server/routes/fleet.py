@@ -11,6 +11,11 @@ from datetime import datetime
 
 router = APIRouter(prefix="/fleet", tags=["fleet"])
 
+# NOTE (Sept 25 review): intentionally narrower than commands.py's per-machine
+# ALLOWED set -- reassign_server, apply_upgrade, and checkpoint_restore/
+# discard/list are single-machine-only actions too high-risk to broadcast
+# fleet-wide, so they are deliberately excluded from fleet dispatch rather
+# than missing by oversight.
 ALLOWED = {"scan", "boost", "clean", "fix", "rollback", "exec", "checkpoint_start"}
 GATED   = {"boost", "clean", "fix", "rollback"}  # require node action passphrase, if one is set
 SIGNED  = {"exec", "checkpoint_start"}  # require a valid master-key signature instead of a node passphrase

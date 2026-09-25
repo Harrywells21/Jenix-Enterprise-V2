@@ -4,9 +4,10 @@ JENIX Fleet Analytics — powers the executive dashboard.
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from db import get_db, Machine, Metric, Alert, Command, AuditLog, CveScan, CveFinding, compute_audit_hash, User
-from auth import get_current_user, User
+from auth import get_current_user, require_operator, User
 from health_score import calculate_health_score, calculate_compliance_score, SEV_ORDER
 from datetime import datetime, timedelta
+import os
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -214,7 +215,7 @@ ALLOWED_ALERT_STATUSES = {"open", "investigating", "acknowledged", "resolved", "
 @router.patch("/alerts/{alert_id}/status")
 def set_alert_status(alert_id: int, body: dict = Body(...),
                      db: Session = Depends(get_db),
-                     _:  User    = Depends(get_current_user)):
+                     _:  User    = Depends(require_operator)):
     new_status = body.get("status")
     if new_status not in ALLOWED_ALERT_STATUSES:
         raise HTTPException(status_code=400,
@@ -232,7 +233,7 @@ def set_alert_status(alert_id: int, body: dict = Body(...),
 @router.patch("/alerts/{alert_id}/assign")
 def assign_alert(alert_id: int, body: dict = Body(...),
                  db: Session = Depends(get_db),
-                 current_user: User = Depends(get_current_user)):
+                 current_user: User = Depends(require_operator)):
     user_id = body.get("user_id", current_user.id)  # default: assign to whoever calls this
     if user_id is not None:
         target = db.query(User).filter(User.id == user_id).first()
@@ -248,7 +249,7 @@ def assign_alert(alert_id: int, body: dict = Body(...),
 
 @router.post("/alerts/mark-all-read")
 def mark_all_read(db: Session = Depends(get_db),
-                  _:  User    = Depends(get_current_user)):
+                  _:  User    = Depends(require_operator)):
     db.query(Alert).update({"is_read": True})
     db.commit()
     return {"ok": True}
@@ -267,16 +268,19 @@ def cost_savings(db: Session = Depends(get_db),
                      .filter(Command.created_at >= since_week,
                              Command.status == "done").count()
 
-    hourly_rate   = 45   # avg sysadmin hourly rate USD
-    mins_per_task = 30   # mins saved per automated task
+    # Configurable via .env (defaults match the prior hardcoded values);
+    # these remain estimates, not measured telemetry -- flagged explicitly
+    # below since the old hardcoded $65k license_cost sits above JENIX's
+    # own sale range and could mislead a buyer's diligence.
+    hourly_rate   = float(os.getenv("SAVINGS_HOURLY_RATE",   "45"))
+    mins_per_task = float(os.getenv("SAVINGS_MINS_PER_TASK", "30"))
+    license_cost  = float(os.getenv("SAVINGS_LICENSE_COST",  "65000"))
 
     monthly_hours = monthly_cmds * (mins_per_task / 60)
     weekly_hours  = weekly_cmds  * (mins_per_task / 60)
     monthly_saved = monthly_hours * hourly_rate
     weekly_saved  = weekly_hours  * hourly_rate
 
-    # Payback period (assuming $65k license)
-    license_cost   = 65000
     annual_savings = monthly_saved * 12
     payback_months = round(license_cost / monthly_saved, 1) if monthly_saved > 0 else 999
 
@@ -291,4 +295,5 @@ def cost_savings(db: Session = Depends(get_db),
         "payback_months":   payback_months,
         "license_cost":     license_cost,
         "hourly_rate":      hourly_rate,
+        "note": "hourly_rate/mins_per_task/license_cost are configurable estimates (see .env SAVINGS_* vars), not measured data",
     }
