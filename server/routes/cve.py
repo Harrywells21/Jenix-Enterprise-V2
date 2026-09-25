@@ -40,6 +40,8 @@ async def trigger_cve_scan(
 
     def _do_scan():
         result = run_cve_scan(max_packages=30)
+        scanned_at = datetime.utcnow()
+        result["scanned_at"] = scanned_at.isoformat()
         _scan_cache[machine_id] = result
 
         # Persist to DB so results survive restarts and build real history
@@ -49,7 +51,7 @@ async def trigger_cve_scan(
                 machine_id          = machine_id,
                 triggered_by_id     = triggered_id,
                 triggered_by_name   = triggered_name,
-                scanned_at          = datetime.utcnow(),
+                scanned_at          = scanned_at,
                 packages_scanned    = result.get("packages_scanned", 0),
                 vulnerable_packages = result.get("vulnerable_packages", 0),
                 total_vulns         = result.get("total_vulns", 0),
@@ -89,33 +91,89 @@ def get_cve_results(
     db: Session = Depends(get_db),
     _:  User    = Depends(get_current_user)
 ):
-    if machine_id not in _scan_cache:
+    """Prefer the live in-memory cache (this process's most recent scan);
+    fall back to the last persisted CveScan for this machine so results
+    survive a server restart instead of silently reporting 'no scan yet'
+    when real scan history exists in the DB."""
+    if machine_id in _scan_cache:
+        return {"scanned": True, "source": "cache", **_scan_cache[machine_id]}
+
+    latest = db.query(CveScan).filter(CveScan.machine_id == machine_id) \
+                .order_by(CveScan.scanned_at.desc()).first()
+    if not latest:
         return {"scanned": False,
                 "message": "No scan results yet. Run a scan first."}
-    return {"scanned": True, **_scan_cache[machine_id]}
+
+    grouped = {}
+    for f in latest.findings:
+        key = (f.package, f.version)
+        entry = grouped.setdefault(key, {"package": f.package, "version": f.version, "vulns": []})
+        entry["vulns"].append({
+            "id": f.cve_id, "summary": f.summary,
+            "severity": f.severity, "url": f.url,
+        })
+
+    return {
+        "scanned": True,
+        "source": "db",
+        "packages_scanned":    latest.packages_scanned,
+        "vulnerable_packages": latest.vulnerable_packages,
+        "total_vulns":         latest.total_vulns,
+        "critical":            latest.critical,
+        "high":                latest.high,
+        "risk_level":          latest.risk_level,
+        "scanned_at":          latest.scanned_at.isoformat(),
+        "results":             list(grouped.values()),
+    }
 
 @router.get("/summary")
 def cve_summary(db: Session = Depends(get_db),
                 _:  User    = Depends(get_current_user)):
-    total_critical = sum(
-        r.get("critical", 0) for r in _scan_cache.values()
-    )
-    total_high = sum(
-        r.get("high", 0) for r in _scan_cache.values()
-    )
-    machines_scanned = len(_scan_cache)
+    """Merges the live in-memory cache with the last persisted CveScan per
+    machine so a server restart doesn't silently drop machines out of the
+    fleet-wide CVE summary. Cache always wins for a machine that has one
+    (freshest within this process's lifetime); DB fills in the rest."""
+    db_machine_ids = {row[0] for row in db.query(CveScan.machine_id).distinct().all()}
+    machine_ids = set(_scan_cache.keys()) | db_machine_ids
+
+    total_critical = 0
+    total_high = 0
+    last_scans = {}
+    for mid in machine_ids:
+        if mid in _scan_cache:
+            r = _scan_cache[mid]
+            source = "cache"
+            scanned_at = r.get("scanned_at")
+            critical = r.get("critical", 0)
+            high = r.get("high", 0)
+            vulnerable_packages = r.get("vulnerable_packages")
+            risk_level = r.get("risk_level")
+        else:
+            latest = db.query(CveScan).filter(CveScan.machine_id == mid) \
+                        .order_by(CveScan.scanned_at.desc()).first()
+            if not latest:
+                continue
+            source = "db"
+            scanned_at = latest.scanned_at.isoformat()
+            critical = latest.critical
+            high = latest.high
+            vulnerable_packages = latest.vulnerable_packages
+            risk_level = latest.risk_level
+
+        total_critical += critical
+        total_high += high
+        last_scans[str(mid)] = {
+            "scanned_at":          scanned_at,
+            "vulnerable_packages": vulnerable_packages,
+            "risk_level":          risk_level,
+            "source":              source,
+        }
+
     return {
-        "machines_scanned": machines_scanned,
+        "machines_scanned": len(last_scans),
         "total_critical":   total_critical,
         "total_high":       total_high,
-        "last_scans": {
-            str(mid): {
-                "scanned_at":          r.get("scanned_at"),
-                "vulnerable_packages": r.get("vulnerable_packages"),
-                "risk_level":          r.get("risk_level"),
-            }
-            for mid, r in _scan_cache.items()
-        }
+        "last_scans":       last_scans,
     }
 
 
