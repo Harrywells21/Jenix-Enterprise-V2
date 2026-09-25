@@ -8,7 +8,7 @@ _agents:     Dict[str, WebSocket] = {}
 _dashboards: list[WebSocket]      = []
 
 async def agent_endpoint(websocket: WebSocket, token: str):
-    from db import SessionLocal, Machine, Metric, Alert
+    from db import SessionLocal, Machine, Metric, Alert, DowntimeWindow
     from notifications import notify_critical_alert
     from alert_cooldown import should_create_alert
 
@@ -41,6 +41,13 @@ async def agent_endpoint(websocket: WebSocket, token: str):
             _agents.pop(token, None)
             await websocket.close(code=4003)
             return
+        if m.status == "offline":
+            open_dw = db.query(DowntimeWindow).filter(
+                DowntimeWindow.machine_id == m.id,
+                DowntimeWindow.ended_at.is_(None)
+            ).order_by(DowntimeWindow.started_at.desc()).first()
+            if open_dw:
+                open_dw.ended_at = datetime.utcnow()
         m.status    = "online"
         m.last_seen = datetime.utcnow()
         db.commit()
@@ -67,8 +74,16 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                     m = db.query(Machine)\
                           .filter(Machine.token == token).first()
                     if m:
+                        was_offline = (m.status == "offline")
                         m.last_seen = datetime.utcnow()
                         m.status    = "online"
+                        if was_offline:
+                            open_dw = db.query(DowntimeWindow).filter(
+                                DowntimeWindow.machine_id == m.id,
+                                DowntimeWindow.ended_at.is_(None)
+                            ).order_by(DowntimeWindow.started_at.desc()).first()
+                            if open_dw:
+                                open_dw.ended_at = datetime.utcnow()
                         metric = Metric(
                             machine_id = m.id,
                             cpu        = data.get("cpu",     0.0),
@@ -240,6 +255,13 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                 if m:
                     was_reassigning = (m.status == "reassigning")
                     m.status = "reassigned" if was_reassigning else "offline"
+                    if not was_reassigning:
+                        existing_open = db.query(DowntimeWindow).filter(
+                            DowntimeWindow.machine_id == m.id,
+                            DowntimeWindow.ended_at.is_(None)
+                        ).first()
+                        if not existing_open:
+                            db.add(DowntimeWindow(machine_id=m.id, started_at=datetime.utcnow()))
                     db.commit()
                     if not was_reassigning:
                         from notifications import notify_machine_offline
@@ -307,7 +329,7 @@ async def _broadcast_dashboards(payload: dict):
             _dashboards.remove(ws)
 
 async def offline_watchdog():
-    from db import SessionLocal, Machine, Alert
+    from db import SessionLocal, Machine, Alert, DowntimeWindow
     from datetime import timedelta
     from notifications import notify_machine_offline
     from alert_cooldown import should_create_alert
@@ -322,6 +344,12 @@ async def offline_watchdog():
             ).all()
             for m in stale:
                 m.status = "offline"
+                existing_open = db.query(DowntimeWindow).filter(
+                    DowntimeWindow.machine_id == m.id,
+                    DowntimeWindow.ended_at.is_(None)
+                ).first()
+                if not existing_open:
+                    db.add(DowntimeWindow(machine_id=m.id, started_at=datetime.utcnow()))
                 if should_create_alert(m.id, "offline"):
                     db.add(Alert(
                         machine_id=m.id, level="critical",

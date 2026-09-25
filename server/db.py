@@ -247,6 +247,14 @@ class Alert(Base):
     machine    = relationship("Machine", back_populates="alerts")
 
 
+class DowntimeWindow(Base):
+    __tablename__ = "downtime_windows"
+    id         = Column(Integer, primary_key=True, index=True)
+    machine_id = Column(Integer, ForeignKey("machines.id"), nullable=False)
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    ended_at   = Column(DateTime, nullable=True)
+
+
 class License(Base):
     __tablename__ = "license"
     id           = Column(Integer, primary_key=True)

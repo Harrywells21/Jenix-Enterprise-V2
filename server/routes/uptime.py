@@ -1,15 +1,39 @@
 """
 JENIX Uptime Monitor
 Tracks machine uptime, downtime incidents, SLA compliance.
+
+Downtime is measured from real DowntimeWindow rows (opened when a machine's
+status flips to "offline" via WS disconnect or the offline_watchdog poller,
+closed when it reconnects/reports online again -- see db.py's DowntimeWindow
+model and the state-flip points in ws/handler.py) rather than a flat
+5-minutes-per-offline-alert estimate. Response shape is unchanged from the
+prior version, so no frontend changes are required.
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func
-from db import get_db, Machine, Metric, Alert
+from sqlalchemy import func, or_
+from db import get_db, Machine, Metric, Alert, DowntimeWindow
 from auth import get_current_user, User
 from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/uptime", tags=["uptime"])
+
+
+def _downtime_minutes_and_windows(db, machine_id, since, now):
+    windows = db.query(DowntimeWindow).filter(
+        DowntimeWindow.machine_id == machine_id,
+        DowntimeWindow.started_at < now,
+        or_(DowntimeWindow.ended_at.is_(None), DowntimeWindow.ended_at >= since)
+    ).order_by(DowntimeWindow.started_at.desc()).all()
+
+    seconds = 0.0
+    for w in windows:
+        w_start = max(w.started_at, since)
+        w_end   = w.ended_at or now
+        seconds += max(0.0, (w_end - w_start).total_seconds())
+
+    return round(seconds / 60, 2), windows
+
 
 @router.get("/{machine_id}")
 def get_uptime(machine_id: int,
@@ -20,88 +44,71 @@ def get_uptime(machine_id: int,
     if not m:
         return {"error": "Machine not found"}
 
-    since = datetime.utcnow() - timedelta(days=days)
+    now   = datetime.utcnow()
+    since = now - timedelta(days=days)
 
-    # Get offline alerts as downtime incidents
-    offline_alerts = db.query(Alert).filter(
-        Alert.machine_id == machine_id,
-        Alert.type       == "offline",
-        Alert.timestamp  >= since
-    ).order_by(Alert.timestamp.desc()).all()
+    downtime_minutes, windows = _downtime_minutes_and_windows(db, machine_id, since, now)
 
-    # Calculate uptime percentage
-    total_minutes    = days * 24 * 60
-    downtime_minutes = len(offline_alerts) * 5  # estimate 5min per incident
-    uptime_minutes   = max(0, total_minutes - downtime_minutes)
-    uptime_pct       = round((uptime_minutes / total_minutes) * 100, 2)
+    total_minutes  = days * 24 * 60
+    uptime_minutes = max(0, total_minutes - downtime_minutes)
+    uptime_pct     = round((uptime_minutes / total_minutes) * 100, 2)
 
-    # SLA compliance
-    sla_target  = 99.0
-    sla_met     = uptime_pct >= sla_target
+    sla_target = 99.0
+    sla_met    = uptime_pct >= sla_target
 
-    # Daily breakdown (last 30 days)
     daily = []
     for i in range(min(days, 30)):
-        day    = datetime.utcnow() - timedelta(days=i)
-        day_start = day.replace(hour=0, minute=0, second=0)
-        day_end   = day.replace(hour=23, minute=59, second=59)
+        day       = now - timedelta(days=i)
+        day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end   = day.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-        # Count metrics for this day
         metric_count = db.query(func.count(Metric.id)).filter(
             Metric.machine_id == machine_id,
             Metric.timestamp  >= day_start,
             Metric.timestamp  <= day_end
         ).scalar()
 
-        # Count offline alerts for this day
-        offline_count = db.query(func.count(Alert.id)).filter(
-            Alert.machine_id == machine_id,
-            Alert.type       == "offline",
-            Alert.timestamp  >= day_start,
-            Alert.timestamp  <= day_end
-        ).scalar()
+        day_windows = [
+            w for w in windows
+            if (w.started_at <= day_end) and ((w.ended_at or now) >= day_start)
+        ]
 
-        status = "up"   if metric_count > 0 and offline_count == 0 \
-            else "down" if offline_count > 0 \
+        status = "down" if day_windows \
+            else "up" if metric_count > 0 \
             else "unknown"
 
         daily.append({
-            "date":          day.strftime("%Y-%m-%d"),
-            "status":        status,
-            "metric_count":  metric_count,
-            "incidents":     offline_count,
+            "date":         day.strftime("%Y-%m-%d"),
+            "status":       status,
+            "metric_count": metric_count,
+            "incidents":    len(day_windows),
         })
 
     return {
-        "machine_id":      machine_id,
-        "hostname":        m.hostname,
-        "current_status":  m.status,
-        "days_monitored":  days,
-        "uptime_pct":      uptime_pct,
-        "downtime_minutes":downtime_minutes,
-        "incidents":       len(offline_alerts),
-        "sla_target":      sla_target,
-        "sla_met":         sla_met,
-        "daily":           daily,
-        "last_seen":       m.last_seen.isoformat() if m.last_seen else None,
+        "machine_id":       machine_id,
+        "hostname":         m.hostname,
+        "current_status":   m.status,
+        "days_monitored":   days,
+        "uptime_pct":       uptime_pct,
+        "downtime_minutes": downtime_minutes,
+        "incidents":        len(windows),
+        "sla_target":       sla_target,
+        "sla_met":          sla_met,
+        "daily":            daily,
+        "last_seen":        m.last_seen.isoformat() if m.last_seen else None,
     }
 
 @router.get("/fleet/summary")
 def fleet_uptime_summary(db: Session = Depends(get_db),
                          _:  User    = Depends(get_current_user)):
     machines = db.query(Machine).all()
-    since    = datetime.utcnow() - timedelta(days=30)
+    now      = datetime.utcnow()
+    since    = now - timedelta(days=30)
     results  = []
 
     for m in machines:
-        offline_count = db.query(func.count(Alert.id)).filter(
-            Alert.machine_id == m.id,
-            Alert.type       == "offline",
-            Alert.timestamp  >= since
-        ).scalar()
-
-        total_minutes    = 30 * 24 * 60
-        downtime_minutes = offline_count * 5
+        downtime_minutes, windows = _downtime_minutes_and_windows(db, m.id, since, now)
+        total_minutes = 30 * 24 * 60
         uptime_pct = round(
             max(0, (total_minutes - downtime_minutes) / total_minutes * 100), 2
         )
@@ -111,7 +118,7 @@ def fleet_uptime_summary(db: Session = Depends(get_db),
             "hostname":    m.hostname,
             "status":      m.status,
             "uptime_pct":  uptime_pct,
-            "incidents":   offline_count,
+            "incidents":   len(windows),
             "sla_met":     uptime_pct >= 99.0,
         })
 
