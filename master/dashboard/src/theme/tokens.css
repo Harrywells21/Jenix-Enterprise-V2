@@ -1,0 +1,80 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600&family=Cabinet+Grotesk:wght@300;400;500;600;700;800&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Core palette — carried over from Floor 1's dashboard so Master feels
+     like the same product, not a bolted-on second UI */
+  --bg-void:        #060812;
+  --bg-base:        #080d1a;
+  --bg-surface:     #0c1220;
+  --bg-elevated:    #101828;
+  --bg-card:        #111e30;
+  --bg-card-hover:  #152238;
+  --bg-input:       #0e1929;
+
+  --border-subtle:  rgba(255,255,255,0.04);
+  --border-default: rgba(255,255,255,0.07);
+  --border-accent:  rgba(56,189,248,0.25);
+  --border-strong:  rgba(56,189,248,0.5);
+
+  --cyan:      #38bdf8; --cyan-dim: rgba(56,189,248,0.12);
+  --emerald:   #10b981; --emerald-dim: rgba(16,185,129,0.12);
+  --amber:     #f59e0b; --amber-dim: rgba(245,158,11,0.12);
+  --rose:      #f43f5e; --rose-dim: rgba(244,63,94,0.12);
+  --violet:    #8b5cf6; --violet-dim: rgba(139,92,246,0.12);
+  --slate:     #64748b; --slate-dim: rgba(100,116,139,0.12);
+
+  /* Severity system — new, specific to the monitoring/signals surface */
+  --sev-critical: #f43f5e; --sev-critical-dim: rgba(244,63,94,0.1);
+  --sev-high:     #f97316; --sev-high-dim: rgba(249,115,22,0.1);
+  --sev-medium:   #f59e0b; --sev-medium-dim: rgba(245,158,11,0.1);
+  --sev-low:      #38bdf8; --sev-low-dim: rgba(56,189,248,0.1);
+  --sev-info:     #64748b; --sev-info-dim: rgba(100,116,139,0.1);
+
+  --text-primary:   #e8f0fe;
+  --text-secondary: #7a8fa6;
+  --text-muted:     #3d5068;
+
+  --font-display: 'Syne', sans-serif;
+  --font-body:    'Cabinet Grotesk', sans-serif;
+  --font-mono:    'JetBrains Mono', monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html, body { height: 100%; font-family: var(--font-body); background: var(--bg-void); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
+#root { height: 100%; }
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(56,189,248,0.2); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(56,189,248,0.4); }
+::selection { background: rgba(56,189,248,0.2); color: #fff; }
+
+@keyframes fadeUp   { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeIn   { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes slideIn  { from { transform: translateX(24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes spin     { to { transform: rotate(360deg); } }
+@keyframes shimmer  { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+
+.font-display { font-family: var(--font-display) !important; }
+.font-mono    { font-family: var(--font-mono) !important; }
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+button, input, select { font-family: inherit; }
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--cyan); outline-offset: 1px;
+}
