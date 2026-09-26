@@ -1,0 +1,51 @@
+JENIX Enterprise — Proprietary License
+
+Copyright (c) 2026 Aaditya Singh ("Author"). All Rights Reserved.
+
+This software, including all source code, object code, documentation,
+architecture, designs, and associated materials (collectively, the
+"Software"), is the proprietary and confidential property of the
+Author. No license, right, or interest in the Software is granted to
+any party by mere possession, access, evaluation, or trial use.
+
+1. NO IMPLIED LICENSE. Nothing in this document, or in any
+   demonstration, trial, evaluation period, or discussion related to
+   the Software, shall be construed as granting any license to use,
+   copy, modify, merge, publish, distribute, sublicense, or sell
+   copies of the Software, in whole or in part.
+
+2. EVALUATION / TRIAL USE. Where the Author has expressly authorized
+   a party to install or run the Software on a trial or evaluation
+   basis, that authorization is limited strictly to the terms
+   (duration, scope, endpoint count, and purpose) separately agreed
+   in writing between the Author and that party, and confers no
+   ownership, redistribution, or continued-use rights beyond what is
+   expressly stated.
+
+3. TRANSFER OF RIGHTS. Full or partial transfer of ownership,
+   copyright, or any other right in the Software occurs ONLY through
+   a separate, explicit, signed rights-assignment or acquisition
+   agreement between the Author and the acquiring party. No other
+   document, communication, or course of dealing effects such a
+   transfer.
+
+4. NO WARRANTY. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+   ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+   WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+   AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+   CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS
+   USE.
+
+5. GOVERNING TERMS. This license governs the Software absent a
+   separate signed agreement. Where a signed rights-assignment or
+   acquisition agreement exists between the Author and a party, that
+   agreement's terms control over this document for that party.
+
+---
+NOTE: This is a freshly drafted license (Sept 26, 2026), not a
+recovery of any earlier draft. A prior draft was made in an
+inaccessible conversation and could not be located on this machine
+(confirmed via live scan of Desktop/Documents/Downloads and full git
+log — only third-party node_modules licenses and a commit message
+noting the original was never committed were found). If that
+original is later located, review it against this version.
