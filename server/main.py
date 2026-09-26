@@ -177,7 +177,7 @@ def health():
         "status":  "ok",
         "app":     "JENIX Enterprise",
         "version": "2.0.0",
-        "time":    __import__("datetime").datetime.utcnow().isoformat()
+        "time":    __import__("datetime").datetime.now(__import__("datetime").timezone.utc).replace(tzinfo=None).isoformat()
     }
 
 # Landing page as server root

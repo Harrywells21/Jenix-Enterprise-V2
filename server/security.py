@@ -7,7 +7,7 @@ JENIX Security Module
 """
 import os, time, hashlib
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -74,7 +74,7 @@ def cleanup_old_tokens():
     from db import SessionLocal, BlacklistedToken
     db = SessionLocal()
     try:
-        cutoff = datetime.utcnow() - timedelta(hours=48)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=48)
         db.query(BlacklistedToken)\
           .filter(BlacklistedToken.created_at < cutoff)\
           .delete()

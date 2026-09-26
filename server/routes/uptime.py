@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from db import get_db, Machine, Metric, Alert, DowntimeWindow
 from auth import get_current_user, User
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 router = APIRouter(prefix="/uptime", tags=["uptime"])
 
@@ -44,7 +44,7 @@ def get_uptime(machine_id: int,
     if not m:
         return {"error": "Machine not found"}
 
-    now   = datetime.utcnow()
+    now   = datetime.now(timezone.utc).replace(tzinfo=None)
     since = now - timedelta(days=days)
 
     downtime_minutes, windows = _downtime_minutes_and_windows(db, machine_id, since, now)
@@ -102,7 +102,7 @@ def get_uptime(machine_id: int,
 def fleet_uptime_summary(db: Session = Depends(get_db),
                          _:  User    = Depends(get_current_user)):
     machines = db.query(Machine).all()
-    now      = datetime.utcnow()
+    now      = datetime.now(timezone.utc).replace(tzinfo=None)
     since    = now - timedelta(days=30)
     results  = []
 

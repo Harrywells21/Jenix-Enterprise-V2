@@ -3,7 +3,7 @@ JENIX Database Backup System
 Runs daily — keeps last 7 backups.
 """
 import asyncio, os, shutil
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BACKUP_DIR = Path(__file__).parent / "backups"
@@ -27,7 +27,7 @@ def backup_now() -> str:
         print("[backup] No database found — skipping")
         return ""
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y%m%d_%H%M%S")
     dest      = BACKUP_DIR / f"jenix_{timestamp}.db"
     shutil.copy2(DB_PATH, dest)
     print(f"[backup] Backup created: {dest}")

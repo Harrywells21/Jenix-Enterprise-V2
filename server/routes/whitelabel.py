@@ -79,7 +79,7 @@ def get_whitelabel_public():
 @router.post("")
 def update_whitelabel(body: WhiteLabelConfig,
                       _: User = Depends(require_admin)):
-    config = body.dict()
+    config = body.model_dump()
     save_config(config)
     return {"ok": True, "config": config}
 

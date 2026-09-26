@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from db import get_db, Machine, Report, Metric, AuditLog, Alert
 from auth import get_current_user, require_operator, User
-from datetime import datetime
+from datetime import datetime, timezone
 import os, textwrap, jwt, csv, re
 from typing import Optional as _Optional
 from routes.audit_trail_report import get_events_from_db, build_audit_trail_pdf, write_audit_csv, risk_band as _shared_risk_band, AuditReportRequest, count_events
@@ -69,7 +69,7 @@ def _generate_pdf(machine: Machine, metrics: list, logs: list,
                                     Table, TableStyle, HRFlowable)
     from reportlab.lib.units import cm
 
-    fname    = f"jenix_report_{machine.hostname}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+    fname    = f"jenix_report_{machine.hostname}_{datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y%m%d_%H%M%S')}.pdf"
     fpath    = os.path.join(REPORTS_DIR, fname)
     doc      = SimpleDocTemplate(fpath, pagesize=A4,
                                  leftMargin=2*cm, rightMargin=2*cm,
@@ -100,7 +100,7 @@ def _generate_pdf(machine: Machine, metrics: list, logs: list,
     story.append(Spacer(1, 0.5*cm))
     story.append(Paragraph(f"<b>Machine:</b> {machine.hostname} ({machine.ip})", body_style))
     story.append(Paragraph(f"<b>OS:</b> {machine.os_name}", body_style))
-    story.append(Paragraph(f"<b>Generated:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", body_style))
+    story.append(Paragraph(f"<b>Generated:</b> {datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M UTC')}", body_style))
     story.append(Spacer(1, 1*cm))
 
     # ── Executive Summary ──────────────────────────────────────────────────
@@ -358,7 +358,7 @@ def _generate_fleet_pdf(machines_data: list) -> tuple:
                                     Table, TableStyle, HRFlowable, PageBreak)
     from reportlab.lib.units import cm
 
-    fname = f"jenix_fleet_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+    fname = f"jenix_fleet_report_{datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y%m%d_%H%M%S')}.pdf"
     fpath = os.path.join(REPORTS_DIR, fname)
     doc   = SimpleDocTemplate(fpath, pagesize=A4,
                               leftMargin=2*cm, rightMargin=2*cm,
@@ -385,7 +385,7 @@ def _generate_fleet_pdf(machines_data: list) -> tuple:
     story.append(HRFlowable(width="100%", color=colors.HexColor("#00bcd4")))
     story.append(Spacer(1, 0.5*cm))
     story.append(Paragraph(f"<b>Machines Covered:</b> {len(machines_data)}", body_style))
-    story.append(Paragraph(f"<b>Generated:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", body_style))
+    story.append(Paragraph(f"<b>Generated:</b> {datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M UTC')}", body_style))
     story.append(Spacer(1, 1*cm))
 
     # ── Fleet Executive Summary ───────────────────────────────────────────
@@ -627,9 +627,9 @@ def generate_audit_report(payload: _Optional[AuditReportRequest] = None,
 
     events = get_events_from_db(db, machine_ids, start, end)
     total_available = count_events(db, machine_ids, start, end)
-    report_id = f"JX-{datetime.utcnow():%Y%m%d-%H%M%S}"
-    generated_utc = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
-    stamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    report_id = f"JX-{datetime.now(timezone.utc).replace(tzinfo=None):%Y%m%d-%H%M%S}"
+    generated_utc = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")
+    stamp = datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y%m%d_%H%M%S')
     if scope_names and len(scope_names) == 1:
         host = "".join(c if (c.isalnum() or c in "-_") else "_" for c in scope_names[0])
         fname = f"jenix_audit_report_{host}_{stamp}.pdf"
@@ -656,7 +656,7 @@ def export_audit_csv(machine_ids: str = Query(None), start: str = Query(None),
                      current_user: User = Depends(get_current_user)):
     ids = [int(x) for x in machine_ids.split(",")] if machine_ids else None
     events = get_events_from_db(db, ids, start, end)
-    fname = f"jenix_audit_export_{datetime.utcnow():%Y%m%d_%H%M%S}.csv"
+    fname = f"jenix_audit_export_{datetime.now(timezone.utc).replace(tzinfo=None):%Y%m%d_%H%M%S}.csv"
     fpath = os.path.join(REPORTS_DIR, fname)
     write_audit_csv(events, fpath)
     return FileResponse(fpath, media_type="text/csv", filename="jenix_audit_trail_export.csv")
@@ -701,7 +701,7 @@ def export_alerts_csv(machine_id: int, db: Session = Depends(get_db),
         raise HTTPException(status_code=404, detail="Machine not found")
     alerts = db.query(Alert).filter(Alert.machine_id == machine_id)\
                .order_by(Alert.timestamp.desc()).all()
-    fname = f"jenix_alerts_export_{m.hostname}_{datetime.utcnow():%Y%m%d_%H%M%S}.csv"
+    fname = f"jenix_alerts_export_{m.hostname}_{datetime.now(timezone.utc).replace(tzinfo=None):%Y%m%d_%H%M%S}.csv"
     fpath = os.path.join(REPORTS_DIR, fname)
     write_alerts_csv(alerts, m.hostname, fpath)
     return FileResponse(fpath, media_type="text/csv", filename="jenix_alerts_export.csv")

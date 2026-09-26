@@ -1,5 +1,5 @@
 import os, jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
@@ -24,7 +24,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_token(data: dict) -> str:
     payload = data.copy()
-    payload["exp"] = datetime.utcnow() + timedelta(hours=EXPIRE_HRS)
+    payload["exp"] = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=EXPIRE_HRS)
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 def decode_token(token: str) -> dict:
@@ -46,7 +46,7 @@ def create_ws_token(user_id: int) -> str:
     payload = {
         "sub": str(user_id),
         "purpose": "ws_dashboard",
-        "exp": datetime.utcnow() + timedelta(seconds=WS_DASHBOARD_TOKEN_EXPIRE_SECONDS),
+        "exp": datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=WS_DASHBOARD_TOKEN_EXPIRE_SECONDS),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 

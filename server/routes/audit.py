@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from db import get_db, AuditLog, Machine, User, compute_audit_hash
 from auth import get_current_user
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib, json, io, csv, os, jwt
 
 router = APIRouter(prefix="/audit", tags=["audit"])
@@ -117,7 +117,7 @@ def export_audit_csv(
             _compute_hash(l),
         ])
     output.seek(0)
-    fname = f"jenix_audit_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    fname = f"jenix_audit_{datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y%m%d_%H%M%S')}.csv"
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode()),
         media_type="text/csv",

@@ -3,7 +3,7 @@ JENIX CVE Scanner — checks installed packages against known vulnerabilities.
 Uses Ubuntu/Debian security advisories and OSV.dev API.
 """
 import json, urllib.request, subprocess, os
-from datetime import datetime
+from datetime import datetime, timezone
 
 OSV_API = "https://api.osv.dev/v1/query"
 
@@ -103,7 +103,7 @@ def run_cve_scan(max_packages: int = 20) -> dict:
                    for v in r["vulns"] if v["severity"] == "HIGH")
 
     return {
-        "scanned_at":         datetime.utcnow().isoformat(),
+        "scanned_at":         datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         "packages_scanned":   len(packages),
         "vulnerable_packages": len(results),
         "total_vulns":        total_vulns,

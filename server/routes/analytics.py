@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from db import get_db, Machine, Metric, Alert, Command, AuditLog, CveScan, CveFinding, compute_audit_hash, User
 from auth import get_current_user, require_operator, User
 from health_score import calculate_health_score, calculate_compliance_score, SEV_ORDER
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -76,7 +76,7 @@ def fleet_overview(db: Session = Depends(get_db),
                         .count()
 
     # Commands run in last 24h
-    since = datetime.utcnow() - timedelta(hours=24)
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
     commands_24h = db.query(Command)\
                      .filter(Command.created_at >= since)\
                      .count()
@@ -224,7 +224,7 @@ def set_alert_status(alert_id: int, body: dict = Body(...),
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     alert.status = new_status
-    alert.updated_at = datetime.utcnow()
+    alert.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     if new_status in ("acknowledged", "investigating"):
         alert.is_read = True
     db.commit()
@@ -243,7 +243,7 @@ def assign_alert(alert_id: int, body: dict = Body(...),
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     alert.assigned_to_user_id = user_id
-    alert.updated_at = datetime.utcnow()
+    alert.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
     return {"ok": True, "id": alert_id, "assigned_to_user_id": user_id}
 
@@ -258,8 +258,8 @@ def mark_all_read(db: Session = Depends(get_db),
 def cost_savings(db: Session = Depends(get_db),
                  _:  User    = Depends(get_current_user)):
     # Commands run this month
-    since_month = datetime.utcnow() - timedelta(days=30)
-    since_week  = datetime.utcnow() - timedelta(days=7)
+    since_month = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+    since_week  = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
 
     monthly_cmds = db.query(Command)\
                      .filter(Command.created_at >= since_month,

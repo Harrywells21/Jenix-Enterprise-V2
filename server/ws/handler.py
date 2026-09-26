@@ -1,7 +1,7 @@
 import asyncio, json
 from sqlalchemy.orm.exc import StaleDataError, ObjectDeletedError
 from fastapi import WebSocket, WebSocketDisconnect
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict
 
 _agents:     Dict[str, WebSocket] = {}
@@ -47,9 +47,9 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                 DowntimeWindow.ended_at.is_(None)
             ).order_by(DowntimeWindow.started_at.desc()).first()
             if open_dw:
-                open_dw.ended_at = datetime.utcnow()
+                open_dw.ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
         m.status    = "online"
-        m.last_seen = datetime.utcnow()
+        m.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
         db.commit()
         machine_id = m.id
         hostname   = m.hostname
@@ -75,7 +75,7 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                           .filter(Machine.token == token).first()
                     if m:
                         was_offline = (m.status == "offline")
-                        m.last_seen = datetime.utcnow()
+                        m.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
                         m.status    = "online"
                         if was_offline:
                             open_dw = db.query(DowntimeWindow).filter(
@@ -83,7 +83,7 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                                 DowntimeWindow.ended_at.is_(None)
                             ).order_by(DowntimeWindow.started_at.desc()).first()
                             if open_dw:
-                                open_dw.ended_at = datetime.utcnow()
+                                open_dw.ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
                         metric = Metric(
                             machine_id = m.id,
                             cpu        = data.get("cpu",     0.0),
@@ -144,7 +144,7 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                             "disk":       disk,
                             "net_mb":     data.get("net_mb",  0.0),
                             "disk_mb":    data.get("disk_mb", 0.0),
-                            "timestamp":  datetime.utcnow().isoformat(),
+                            "timestamp":  datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                         })
                 finally:
                     db.close()
@@ -164,7 +164,7 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                     if cmd:
                         cmd.output     = output_text
                         cmd.status     = status
-                        cmd.updated_at = datetime.utcnow()
+                        cmd.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                         db.commit()
                     await _broadcast_dashboards({
                         "type":      "command_result",
@@ -188,7 +188,7 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                     if cmd:
                         cmd.output     = (cmd.output or "") + output_chunk
                         cmd.status     = status
-                        cmd.updated_at = datetime.utcnow()
+                        cmd.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                         db.commit()
                     await _broadcast_dashboards({
                         "type":   "command_result",
@@ -227,7 +227,7 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                     if m:
                         m.checkpoint_status = data.get("status")
                         m.checkpoint_snapshot_id = data.get("checkpoint_id")
-                        m.checkpoint_armed_at = datetime.utcnow() if data.get("status") == "armed" else None
+                        m.checkpoint_armed_at = datetime.now(timezone.utc).replace(tzinfo=None) if data.get("status") == "armed" else None
                         db.commit()
                         await _broadcast_dashboards({
                             "type": "checkpoint_status",
@@ -261,7 +261,7 @@ async def agent_endpoint(websocket: WebSocket, token: str):
                             DowntimeWindow.ended_at.is_(None)
                         ).first()
                         if not existing_open:
-                            db.add(DowntimeWindow(machine_id=m.id, started_at=datetime.utcnow()))
+                            db.add(DowntimeWindow(machine_id=m.id, started_at=datetime.now(timezone.utc).replace(tzinfo=None)))
                     db.commit()
                     if not was_reassigning:
                         from notifications import notify_machine_offline
@@ -337,7 +337,7 @@ async def offline_watchdog():
         await asyncio.sleep(30)
         db = SessionLocal()
         try:
-            cutoff = datetime.utcnow() - timedelta(seconds=35)
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=35)
             stale  = db.query(Machine).filter(
                 Machine.status   == "online",
                 Machine.last_seen < cutoff
@@ -349,7 +349,7 @@ async def offline_watchdog():
                     DowntimeWindow.ended_at.is_(None)
                 ).first()
                 if not existing_open:
-                    db.add(DowntimeWindow(machine_id=m.id, started_at=datetime.utcnow()))
+                    db.add(DowntimeWindow(machine_id=m.id, started_at=datetime.now(timezone.utc).replace(tzinfo=None)))
                 if should_create_alert(m.id, "offline"):
                     db.add(Alert(
                         machine_id=m.id, level="critical",

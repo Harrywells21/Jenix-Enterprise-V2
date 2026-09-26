@@ -2,7 +2,7 @@
 JENIX License System — generates and validates perpetual license keys.
 """
 import hashlib, json, base64, os
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -15,7 +15,7 @@ def generate_license(company_name: str, max_nodes: int = -1,
         "company":    company_name,
         "max_nodes":  max_nodes,
         "perpetual":  is_perpetual,
-        "issued_at":  datetime.utcnow().isoformat(),
+        "issued_at":  datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
     }
     data     = json.dumps(payload, sort_keys=True)
     sig      = hashlib.sha256(f"{data}{SECRET}".encode()).hexdigest()[:16]

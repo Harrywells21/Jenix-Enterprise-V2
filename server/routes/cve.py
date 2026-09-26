@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from db import get_db, Machine, AuditLog, CveScan, CveFinding, SessionLocal
 from auth import get_current_user, require_operator, User
 from cve_scanner import run_cve_scan
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 router = APIRouter(prefix="/cve", tags=["cve"])
@@ -40,7 +40,7 @@ async def trigger_cve_scan(
 
     def _do_scan():
         result = run_cve_scan(max_packages=30)
-        scanned_at = datetime.utcnow()
+        scanned_at = datetime.now(timezone.utc).replace(tzinfo=None)
         result["scanned_at"] = scanned_at.isoformat()
         _scan_cache[machine_id] = result
 
@@ -244,7 +244,7 @@ def export_cve_excel(
     ws1.title = "Executive Summary"
     ws1["A1"] = "JENIX Enterprise — CVE Security Report"
     ws1["A1"].font = title_font
-    ws1["A2"] = f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+    ws1["A2"] = f"Generated: {datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M UTC')}"
     ws1["A2"].font = body_font
 
     total_scans = len(scans)
@@ -380,7 +380,7 @@ def export_cve_excel(
     buf = _io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    fname = f"jenix_cve_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    fname = f"jenix_cve_report_{datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y%m%d_%H%M%S')}.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -2,7 +2,7 @@
 JENIX Scheduler — automated scans with duplicate guard.
 """
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -54,7 +54,7 @@ async def _run_scheduled_scan(schedule_id: int):
 
         # Duplicate guard — skip if ran in last 23 hours
         if s.last_run:
-            hours_since = (datetime.utcnow() - s.last_run)\
+            hours_since = (datetime.now(timezone.utc).replace(tzinfo=None) - s.last_run)\
                           .total_seconds() / 3600
             if hours_since < 23:
                 print(f"[scheduler] Skipping schedule {schedule_id}"
@@ -78,7 +78,7 @@ async def _run_scheduled_scan(schedule_id: int):
         if not sent:
             cmd.output = "Agent not connected"
 
-        s.last_run = datetime.utcnow()
+        s.last_run = datetime.now(timezone.utc).replace(tzinfo=None)
         log = AuditLog(
             machine_id = m.id,
             action     = "scheduled_scan",

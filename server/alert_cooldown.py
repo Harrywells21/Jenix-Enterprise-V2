@@ -2,7 +2,7 @@
 JENIX Alert Cooldown System
 Prevents duplicate alerts within a cooldown window.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Tuple
 
 # key = (machine_id, alert_type) → last alert timestamp
@@ -23,7 +23,7 @@ def should_create_alert(machine_id: int,
     the last alert of this type for this machine.
     """
     key     = (machine_id, alert_type)
-    now     = datetime.utcnow()
+    now     = datetime.now(timezone.utc).replace(tzinfo=None)
     cooldown = COOLDOWN_MINUTES.get(alert_type, 30)
 
     if key in _cooldown_store:
@@ -41,7 +41,7 @@ def clear_cooldown(machine_id: int, alert_type: str):
 
 def get_cooldown_status() -> dict:
     """Debug view of current cooldowns."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     return {
         f"{mid}:{atype}": {
             "last_alert": ts.isoformat(),

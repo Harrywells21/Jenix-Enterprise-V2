@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from db import get_db, Machine, AuditLog, hash_passphrase, Site
 from auth import get_current_user, require_admin, User
-from datetime import datetime
+from datetime import datetime, timezone
 import secrets
 
 router = APIRouter(prefix="/machines", tags=["machines"])
@@ -53,7 +53,7 @@ def register(body: MachineRegister, db: Session = Depends(get_db)):
         existing.kernel    = body.kernel
         if existing.status != "pending":
             existing.status = "offline"  # WS handler (agent_endpoint) sets "online" once truly connected
-        existing.last_seen = datetime.utcnow()
+        existing.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
         db.commit()
         return {"token": existing.token, "machine_id": existing.id}
     token   = secrets.token_hex(32)
