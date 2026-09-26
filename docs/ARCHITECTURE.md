@@ -219,13 +219,23 @@ Master holds no business data. It:
 
 ## 4. Agent (`agent/`)
 
-Files present: `jenix_agent.py`, `agent.py`, `jenix_gui_agent.py`, `collector.py`, `executor.py`,
+Files present: `agent.py`, `jenix_gui_agent.py`, `collector.py`, `executor.py`,
 `snapshot.py`, `checkpoint.py`, `topology_auth.py`, `fleet_auth.py`, plus three
 `_*_baked.py` files (`_topology_floors_baked.py`, `_topology_key_baked.py`, `_fleet_key_baked.py`)
 whose naming strongly implies compile-time-embedded trust material (the baked-in floor list and
 public key referenced in §3's signature-verification description) — **not yet inspected in full**;
 this section is structural only and should be expanded once those files are reviewed in a later
 session.
+
+**Real entrypoints confirmed (Sept 26 2026):** `agent.py` is the real CLI service agent (built via
+`JenixAgentCLI.spec` into `JenixAgent-windows`; bundles collector.py/executor.py/fleet_auth.py/
+snapshot.py/checkpoint.py/topology_auth.py plus the three baked trust files). `jenix_gui_agent.py`
+is a separate, deliberately lighter tkinter GUI wrapper with LAN auto-discovery (built via
+`JenixAgent.spec` into `JenixAgentGUI`), meant as an easy on-ramp, not the service agent. A third
+file, `jenix_agent.py` (an early monolithic "v3.0" prototype), was confirmed orphaned dead code —
+referenced by neither `.spec` file, no git history of its own, zero references anywhere else in
+the repo — and was removed from the codebase this session (backed up to
+`~/Desktop/jenix_agent_removed_<timestamp>.py` before deletion).
 
 ## 5. Known issues found and fixed this project (for buyer changelog / due diligence)
 
