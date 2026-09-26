@@ -140,6 +140,9 @@ def build_executive_summary(events, notable_groups):
     ok = sum(1 for e in events if e["status"] == "ok")
     n = len(events)
     crit_events = [e for e in events if e["status"] == "critical"]
+    hash_verified = sum(1 for e in events if e.get("hash_status") == "verified")
+    hash_tampered = sum(1 for e in events if e.get("hash_status") == "tampered")
+    hash_unverifiable = sum(1 for e in events if e.get("hash_status") == "unverifiable")
 
     if n == 0:
         narrative = "No audit events were recorded for this scope and period."
@@ -184,7 +187,30 @@ def build_executive_summary(events, notable_groups):
         "warning_count": warning,
         "ok_count": ok,
         "narrative": narrative,
+        "hash_verified_count": hash_verified,
+        "hash_tampered_count": hash_tampered,
+        "hash_unverifiable_count": hash_unverifiable,
     }
+
+
+def _hash_integrity_line(exec_sum):
+    """Real per-event SHA-256 re-verification counts (see get_events_from_db /
+    compute_audit_hash) -- mirrors routes/audit.py's own /logs/verify/{log_id}
+    logic applied across the whole report scope, not a presence check."""
+    verified = exec_sum.get("hash_verified_count", 0)
+    tampered = exec_sum.get("hash_tampered_count", 0)
+    unverifiable = exec_sum.get("hash_unverifiable_count", 0)
+    total = verified + tampered + unverifiable
+    if total == 0:
+        return "No audit entries were available to hash-verify for this scope and period."
+    entry_word = "entry" if total == 1 else "entries"
+    line = f"{verified} of {total} audit-log {entry_word} hash-verified against their stored SHA-256 fingerprint"
+    if tampered:
+        line += f"; {tampered} FAILED verification (possible tampering)"
+    if unverifiable:
+        have_word = "has" if unverifiable == 1 else "have"
+        line += f"; {unverifiable} {have_word} no stored hash to check (legacy entries)"
+    return line + "."
 
 
 # ---------------------------------------------------------------------------
@@ -511,6 +537,8 @@ def build_audit_trail_pdf(events, report_id, generated_utc, out_path,
     story.append(Paragraph("INTEGRITY STATUS", ss["GroupCaption"]))
     story.append(Spacer(1, 6))
     story.append(Paragraph(exec_sum["narrative"], ss["Narrative"]))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(_hash_integrity_line(exec_sum), ss["Narrative"]))
     story.append(Spacer(1, 12))
 
     # ---- 2.3 EVENT BREAKDOWN BY STATUS ----
@@ -660,7 +688,7 @@ def get_events_from_db(db_session, machine_ids=None, start=None, end=None):
     (e.g. node_redirect_pending) - labeled "system" to match scope_of()'s existing
     System-scope action list in report_logic.py.
     """
-    from db import AuditLog, Machine
+    from db import AuditLog, Machine, compute_audit_hash
     query = db_session.query(AuditLog).order_by(AuditLog.timestamp.desc())
     if machine_ids:
         query = query.filter(AuditLog.machine_id.in_(machine_ids))
@@ -672,6 +700,12 @@ def get_events_from_db(db_session, machine_ids=None, start=None, end=None):
     machines = {m.id: m.hostname for m in db_session.query(Machine).all()}
     events = []
     for l in logs:
+        if l.content_hash is None:
+            hash_status = "unverifiable"
+        else:
+            _computed = compute_audit_hash(l.id, l.machine_id, l.user_id, l.action,
+                                            l.detail, l.status, l.timestamp)
+            hash_status = "verified" if _computed == l.content_hash else "tampered"
         events.append({
             "id": l.id,
             "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M") if l.timestamp else "",
@@ -680,6 +714,7 @@ def get_events_from_db(db_session, machine_ids=None, start=None, end=None):
             "detail": l.detail or "",
             "status": l.status or "ok",
             "fingerprint": l.content_hash or "",
+            "hash_status": hash_status,
         })
     return events
 
